@@ -24,6 +24,7 @@ function pretend(opts: { admin?: boolean; access?: { realm_id: string; can_edit_
     if (u.includes('/rest/v1/ac_client_access')) return new Response(JSON.stringify(opts.access ?? []))
     if (u.includes('/rest/v1/ac_snapshots') && opts.snapshotAt) return new Response(JSON.stringify([{ fetched_at: opts.snapshotAt }]))
     if (u.includes('/rest/v1/ac_reports') && opts.reportAt) return new Response(JSON.stringify([opts.reportAt]))
+    if (u.includes('/rpc/ac_get_connection')) return new Response(JSON.stringify([{ realm_id: MINE, label: 'direct', company_name: 'Direct Sight', access_token: 'ACCESS', refresh_token: 'REFRESH', access_expires_at: new Date(Date.now() + 3600_000).toISOString(), refresh_expires_at: new Date(Date.now() + 8e9).toISOString() }]))
     if (u.includes('/rest/v1/ac_connections')) return new Response(JSON.stringify([{ realm_id: MINE, label: 'direct', company_name: 'Direct Sight' }]))
     return new Response('[]')
   }) as typeof fetch
@@ -51,6 +52,8 @@ test('a client sees only their own company in the list', async () => {
   const res = await companies(ctx('/api/companies'))
   assert.equal(res.status, 200)
   assert.ok(calls.some((c) => c.includes('ac_connections') && c.includes(`realm_id=in.(${MINE})`)), 'list query is filtered to their company')
+  const list = calls.find((c) => c.includes('/rest/v1/ac_connections'))!
+  assert.ok(!/token/.test(list) && !/select=\*/.test(list), 'the company list never asks for token columns')
 })
 
 test('an admin sees every company (no filter)', async () => {

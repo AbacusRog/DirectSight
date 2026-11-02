@@ -1,6 +1,7 @@
 // Shared helpers for the Pages Functions. Dependency-free (fetch only).
 // This app keeps its own QuickBooks connections in public.ac_connections (separate from the
-// other Abacus apps). Every token refresh MUST be written straight back: Intuit rotates refresh tokens.
+// other Abacus apps). The tokens themselves are encrypted in Supabase Vault and only ever read or
+// written through the server-only functions ac_get_connection / ac_update_tokens / ac_save_connection. Every token refresh MUST be written straight back: Intuit rotates refresh tokens.
 
 export interface Env {
   SUPABASE_URL: string
@@ -151,7 +152,7 @@ export interface Connection {
 }
 
 export async function loadConnection(env: Env, realm: string): Promise<Connection> {
-  const rows = await sb(env, `ac_connections?realm_id=eq.${encodeURIComponent(realm)}&select=*`)
+  const rows = (await sb(env, 'rpc/ac_get_connection', { method: 'POST', body: JSON.stringify({ p_realm: realm }) })) as Connection[] | null
   if (!rows?.length) throw new Error('No QuickBooks connection for that company')
   return rows[0]
 }
@@ -201,7 +202,16 @@ export async function refresh(env: Env, conn: Connection): Promise<Connection> {
     refresh_expires_at: new Date(now + t.x_refresh_token_expires_in * 1000).toISOString(),
     updated_at: new Date(now).toISOString(),
   }
-  await sb(env, `ac_connections?realm_id=eq.${encodeURIComponent(conn.realm_id)}`, { method: 'PATCH', body: JSON.stringify(patch) }, { prefer: 'return=minimal' })
+  await sb(env, 'rpc/ac_update_tokens', {
+    method: 'POST',
+    body: JSON.stringify({
+      p_realm: conn.realm_id,
+      p_access: patch.access_token,
+      p_refresh: patch.refresh_token,
+      p_access_exp: patch.access_expires_at,
+      p_refresh_exp: patch.refresh_expires_at,
+    }),
+  })
   await logCall(env, conn.realm_id, 'oauth2/tokens/bearer', res.status, tid, 'refreshed')
   return { ...conn, ...patch }
 }
@@ -411,25 +421,18 @@ export async function completeConnect(env: Env, request: Request, code: string, 
   if (info.ok) companyName = ((await info.json()) as { CompanyInfo?: { CompanyName?: string } }).CompanyInfo?.CompanyName ?? null
 
   const now = Date.now()
-  await sb(
-    env,
-    'ac_connections?on_conflict=realm_id',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        realm_id: realm,
-        label: st.label,
-        company_name: companyName,
-        access_token: t.access_token,
-        refresh_token: t.refresh_token,
-        access_expires_at: new Date(now + t.expires_in * 1000).toISOString(),
-        refresh_expires_at: new Date(now + t.x_refresh_token_expires_in * 1000).toISOString(),
-        connected_at: new Date(now).toISOString(),
-        updated_at: new Date(now).toISOString(),
-      }),
-    },
-    { prefer: 'resolution=merge-duplicates,return=minimal' },
-  )
+  await sb(env, 'rpc/ac_save_connection', {
+    method: 'POST',
+    body: JSON.stringify({
+      p_realm: realm,
+      p_label: st.label,
+      p_company: companyName,
+      p_access: t.access_token,
+      p_refresh: t.refresh_token,
+      p_access_exp: new Date(now + t.expires_in * 1000).toISOString(),
+      p_refresh_exp: new Date(now + t.x_refresh_token_expires_in * 1000).toISOString(),
+    }),
+  })
   return companyName ?? st.label
 }
 

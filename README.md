@@ -31,7 +31,7 @@ To remove access, run the delete in the same file. In Authentication settings, s
 ## Security
 
 - **Who can see what:** enforced in the database (row-level security) and again on every API call. A client login can reach only its own company; anonymous visitors get nothing. Checked by impersonating a real client login against every table, view and function in the Clients project, not just by reading policies.
-- **Tokens:** QuickBooks tokens live in `ac_connections`, which has RLS on and no policies, so only the server (service role) can read them. Never expose that table.
+- **Tokens:** QuickBooks tokens are **encrypted in Supabase Vault**. `ac_connections` only holds the ids of the secrets; the server reads and writes them through three functions (`ac_get_connection`, `ac_update_tokens`, `ac_save_connection`) that only the service role may run. The browser roles have no access to the table, the functions or Vault. This touches only DirectSight: other apps' QuickBooks tables (e.g. `jmc_qbo_connections`) and their Vault secrets are separate. Migration steps are in `supabase/006` and `007`.
 - **Limits:** a client can refresh at most once every 2 minutes (`CLIENT_COOLDOWN_SECONDS`), to protect the QuickBooks allowance. Clients get plain error messages; the detail goes to the server log.
 - **Headers:** `public/_headers` sets a strict Content-Security-Policy (no inline scripts), no framing, no content sniffing, HSTS and a tight referrer policy. If you add a third-party script, font or API, add its address to the policy there.
 - **Call log:** every QuickBooks call is recorded in `ac_api_log` (status and Intuit transaction id).
