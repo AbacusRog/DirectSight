@@ -34,15 +34,15 @@ Light and dark themes (the sun/moon button in the header). It follows the device
 
 ## Management report
 
-The **Management report** tab shows the last 13 months of **Profit and loss** and **Balance sheet** from QuickBooks (accrual or cash basis) in three views:
+The **Management report** tab shows every month from **January 2024** to date of **Profit and loss** and **Balance sheet** from QuickBooks (accrual or cash basis) in three views:
 
-- **Vs last N months**: a chosen month (default the current one) next to each of the previous N months (2-6, 12 or any number up to what is available), their average, and the change in £ and % against that average. A month with no activity counts as £0. If the chosen month is only month to date, a warning offers a one-click switch to the last full month.
+- **Vs last N months**: a chosen month (default the current one) next to each of the previous N months (2-6, 12, 24 or any number up to what is available), their average, and the change in £ and % against that average. A month with no activity counts as £0. If the chosen month is only month to date, a warning offers a one-click switch to the last full month.
 - **Two months**: any two months side by side, with shortcuts for *Latest vs previous month* and *Latest vs same month last year*.
-- **All months**: every month in a grid.
+- **All months**: every month in a grid, one year at a time (default the latest year, with a total for the year on the profit and loss), or all years together.
 
 **Detail** makes the report compact: *Headline totals* (Total Income, Total Expenses, Net Income...), *Totals by category* (one line per account, with any parent account's sub-accounts rolled up into a single line, e.g. Advertising, Legal and professional, Office expenses), *More detail*, or *Full detail*. Empty lines are hidden by default, and **Print** gives a clean page (use the browser's Save as PDF).
 
-Data is pulled with `POST /api/report-sync` (QuickBooks `ProfitAndLoss` / `BalanceSheet` reports summarised by month), cached in `ac_reports`, and refreshed on open if older than an hour. The balance sheet shows balances at each month end; the latest column is as at today.
+Data is pulled from 1 January 2024 (`REPORTS_FROM`; change it in `functions/_lib/reports.ts` and `src/lib/reportCompare.ts` together) with `POST /api/report-sync` (QuickBooks `ProfitAndLoss` / `BalanceSheet` reports summarised by month), cached in `ac_reports`, and refreshed on open if older than an hour. The balance sheet shows balances at each month end; the latest column is as at today.
 
 ## Cloudflare Pages setup
 

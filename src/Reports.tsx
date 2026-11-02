@@ -11,6 +11,10 @@ import {
   isEmptyRow,
   isPartialMonth,
   monthIndexes,
+  REPORTS_FROM,
+  columnYear,
+  sumColumns,
+  yearsOf,
   visibleInDetail,
   type Detail,
   type MonthlyReport,
@@ -45,11 +49,12 @@ export default function Reports({ realm }: { realm: string }) {
   const [ai, setAi] = useState(0) // main month
   const [bi, setBi] = useState(0) // comparison month (two-month view)
   const [n, setN] = useState(3) // how many previous months (trend view)
+  const [year, setYear] = useState<string>('') // year shown in the all-months grid ('' = not chosen yet)
 
   const read = useCallback(async () => {
     const { data, error } = await supabase
       .from('ac_reports')
-      .select('data,fetched_at')
+      .select('data,fetched_at,start_date')
       .eq('realm_id', realm)
       .eq('kind', kind)
       .eq('basis', basis)
@@ -57,7 +62,7 @@ export default function Reports({ realm }: { realm: string }) {
     if (error) throw error
     setReport((data?.data as MonthlyReport) ?? null)
     setFetchedAt(data?.fetched_at ?? null)
-    return data as { fetched_at: string } | null
+    return data as { fetched_at: string; start_date: string } | null
   }, [realm, kind, basis])
 
   const sync = useCallback(async () => {
@@ -82,7 +87,8 @@ export default function Reports({ realm }: { realm: string }) {
     ;(async () => {
       try {
         const cached = await read()
-        if (!cancelled && (!cached || Date.now() - new Date(cached.fetched_at).getTime() > STALE_MS)) await sync()
+        // also refresh a copy saved before the history was extended back to REPORTS_FROM
+        if (!cancelled && (!cached || cached.start_date > REPORTS_FROM || Date.now() - new Date(cached.fetched_at).getTime() > STALE_MS)) await sync()
       } catch (e) {
         if (!cancelled) setError((e as Error).message)
       }
@@ -113,6 +119,18 @@ export default function Reports({ realm }: { realm: string }) {
   const two = useMemo(() => (report ? compareMonths(report, ai, bi).filter((l) => keep(l.row)) : []), [report, ai, bi, keep])
   const trend = useMemo(() => (report ? compareToPrevious(report, ai, nUsed) : null), [report, ai, nUsed])
   const trendLines = useMemo(() => (trend ? trend.lines.filter((l) => keep(l.row)) : []), [trend, keep])
+
+  // All-months grid: one year at a time (35 columns is too wide), defaulting to the latest year.
+  const years = useMemo(() => (report ? yearsOf(report) : []), [report])
+  useEffect(() => {
+    if (years.length && (year === '' || (year !== 'all' && !years.includes(year)))) setYear(years[years.length - 1])
+  }, [years, year])
+  const yr = year || 'all'
+  const gridCols = useMemo(
+    () => (report ? report.columns.map((_, i) => i).filter((i) => yr === 'all' || columnYear(report.columns[i]) === yr) : []),
+    [report, yr],
+  )
+  const yearTotal = kind === 'pnl' && yr !== 'all' // balances don't add up across months
 
   const title = kind === 'pnl' ? 'Profit and loss' : 'Balance sheet'
   const monthSelect = (value: number, set: (i: number) => void, label: string) => (
@@ -172,7 +190,7 @@ export default function Reports({ realm }: { realm: string }) {
             {monthSelect(ai, setAi, 'Month to compare')}
             <span className="text-sm text-muted">with the previous</span>
             <div className="seg" role="group" aria-label="Months to compare with">
-              {[2, 3, 4, 5, 6, 12].filter((x) => x <= maxN).map((x) => (
+              {[2, 3, 4, 5, 6, 12, 24].filter((x) => x <= maxN).map((x) => (
                 <button key={x} aria-pressed={nUsed === x} onClick={() => setN(x)}>{x}</button>
               ))}
             </div>
@@ -283,29 +301,42 @@ export default function Reports({ realm }: { realm: string }) {
       )}
 
       {report && view === 'grid' && (
-        <div className="panel overflow-x-auto">
-          <h2 className="px-4 pb-1 pt-4 text-[1.0625rem]">{title} by month</h2>
-          <table className="ledger">
-            <thead>
-              <tr>
-                <th className={sticky}></th>
-                {report.columns.map((c, i) => (
-                  <th key={i} className="num">{c.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {grid.map((r, ri) => (
-                <tr key={ri} className={rowClass(r, detail, ri === grid.length - 1)}>
-                  <td className={sticky} style={{ paddingLeft: 12 + r.depth * 16 }}>{lab(r)}</td>
-                  {r.values.map((v, i) => (
-                    <td key={i} className="num whitespace-nowrap">{fmtMoney(v)}</td>
-                  ))}
-                </tr>
+        <>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 print:hidden">
+            <span className="text-sm text-muted">Show</span>
+            <div className="seg" role="group" aria-label="Year">
+              {[...years, 'all'].map((y) => (
+                <button key={y} aria-pressed={yr === y} onClick={() => setYear(y)}>{y === 'all' ? `All years` : y}</button>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </div>
+            <span className="text-sm text-muted">History goes back to January 2024.</span>
+          </div>
+          <div className="panel overflow-x-auto">
+            <h2 className="px-4 pb-1 pt-4 text-[1.0625rem]">{title} by month{yr !== 'all' ? `, ${yr}` : ''}</h2>
+            <table className="ledger">
+              <thead>
+                <tr>
+                  <th className={sticky}></th>
+                  {gridCols.map((i) => (
+                    <th key={i} className="num">{report.columns[i].label}</th>
+                  ))}
+                  {yearTotal && <th className="num border-l">Total {yr}{yr === years[years.length - 1] ? ' to date' : ''}</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {grid.map((r, ri) => (
+                  <tr key={ri} className={rowClass(r, detail, ri === grid.length - 1)}>
+                    <td className={sticky} style={{ paddingLeft: 12 + r.depth * 16 }}>{lab(r)}</td>
+                    {gridCols.map((i) => (
+                      <td key={i} className="num whitespace-nowrap">{fmtMoney(r.values[i] ?? null)}</td>
+                    ))}
+                    {yearTotal && <td className="num whitespace-nowrap border-l font-semibold">{fmtMoney(sumColumns(r, gridCols))}</td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
       {kind === 'balance_sheet' && report && (
         <p className="text-xs text-muted">Balance sheet figures are balances at the end of each month. The latest column is as at today.</p>

@@ -50,7 +50,7 @@ test('empty-line detection and formatting', () => {
   assert.ok(fmtChange(-250).includes('250'))
 })
 
-import { compareToPrevious, displayLabel, isPartialMonth, visibleInDetail, type ReportRow } from '../src/lib/reportCompare.ts'
+import { REPORTS_FROM, columnYear, compareToPrevious, displayLabel, isPartialMonth, sumColumns, visibleInDetail, yearsOf, type ReportRow } from '../src/lib/reportCompare.ts'
 
 const mcol = (label: string) => ({ label, start: null, end: null, total: false })
 const trend: MonthlyReport = {
@@ -121,3 +121,27 @@ test('more detail reveals sub-accounts; full detail changes nothing', () => {
   assert.deepEqual(shown('detail').filter((l) => ['Google Ads', 'Leaflets'].includes(l)), ['Google Ads', 'Leaflets'])
   assert.deepEqual(shown('full'), pnlRows.map((r) => r.label))
 })
+
+test('years: from the column dates, else the label; the Total column has none', () => {
+  assert.equal(columnYear({ label: 'Jan 2024', start: '2024-01-01', end: '2024-01-31', total: false }), '2024')
+  assert.equal(columnYear({ label: 'Dec 2025', start: null, end: null, total: false }), '2025')
+  assert.equal(columnYear({ label: 'Total', start: null, end: null, total: true }), null)
+  const r: MonthlyReport = {
+    columns: [
+      { label: 'Dec 2024', start: '2024-12-01', end: '2024-12-31', total: false },
+      { label: 'Jan 2025', start: '2025-01-01', end: '2025-01-31', total: false },
+      { label: 'Feb 2025', start: '2025-02-01', end: '2025-02-28', total: false },
+      { label: 'Total', start: null, end: null, total: true },
+    ],
+    rows: [],
+  }
+  assert.deepEqual(yearsOf(r), ['2024', '2025'])
+})
+
+test("a year's total adds the months shown and stays blank when there is nothing", () => {
+  const row: ReportRow = { label: 'Sales', kind: 'line', depth: 1, values: [10, 20.5, null, 999] }
+  assert.equal(sumColumns(row, [0, 1, 2]), 30.5)
+  assert.equal(sumColumns(row, [2]), null)
+})
+
+test('history starts in January 2024', () => assert.equal(REPORTS_FROM, '2024-01-01'))

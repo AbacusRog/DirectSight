@@ -109,3 +109,26 @@ export function displayLabel(row: ReportRow, detail: Detail): string {
   if (detail !== 'full' && row.kind === 'total' && row.depth >= 1) return row.label.replace(/^total\s+/i, '')
   return row.label
 }
+
+// ---- History window and year filter ---------------------------------------------------------------
+
+/** Reports are pulled from here. Keep in step with REPORTS_FROM in functions/_lib/reports.ts. */
+export const REPORTS_FROM = '2024-01-01'
+
+/** The calendar year a month column belongs to ("2025"), or null for the report's own Total column. */
+export function columnYear(c: ReportColumn): string | null {
+  if (c.total) return null
+  const d = c.end ?? c.start
+  if (d) return d.slice(0, 4)
+  return c.label.match(/(\d{4})/)?.[1] ?? null
+}
+
+/** Years present, oldest first. */
+export const yearsOf = (r: MonthlyReport): string[] => [...new Set(r.columns.map(columnYear).filter((y): y is string => !!y))].sort()
+
+/** Sum of the given columns for a row (blank if every one is blank). Used for a year's total. */
+export function sumColumns(row: ReportRow, idx: number[]): number | null {
+  const vals = idx.map((i) => row.values[i] ?? null)
+  if (vals.every((v) => v === null)) return null
+  return Math.round(vals.reduce<number>((a, v) => a + (v ?? 0), 0) * 100) / 100
+}

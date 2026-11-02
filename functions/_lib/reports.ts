@@ -80,14 +80,16 @@ export function parseMonthlyReport(report: QReport): MonthlyReport {
 
 const iso = (d: Date) => d.toISOString().slice(0, 10)
 
-/** First day of the month `months-1` months ago, through today. */
-export function reportWindow(today: Date, months: number) {
-  const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - (months - 1), 1))
-  return { start: iso(start), end: iso(today) }
+/** Management reports go back to the start of 2024 (keep in step with REPORTS_FROM in src/lib/reportCompare.ts). */
+export const REPORTS_FROM = '2024-01-01'
+
+/** From the start of 2024 through today. */
+export function reportRange(today: Date, from: string = REPORTS_FROM) {
+  return { start: from, end: iso(today) }
 }
 
-export async function syncReport(env: Env, realm: string, kind: ReportKind, basis: Basis, months = 13) {
-  const { start, end } = reportWindow(new Date(), months)
+export async function syncReport(env: Env, realm: string, kind: ReportKind, basis: Basis) {
+  const { start, end } = reportRange(new Date())
   const name = kind === 'pnl' ? 'ProfitAndLoss' : 'BalanceSheet'
   const q = new URLSearchParams({ start_date: start, end_date: end, summarize_column_by: 'Month', accounting_method: basis, minorversion: '75' })
 

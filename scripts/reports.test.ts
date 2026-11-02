@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseMonthlyReport, reportWindow } from '../functions/_lib/reports.ts'
+import { REPORTS_FROM, parseMonthlyReport, reportRange } from '../functions/_lib/reports.ts'
 
 const c = (value: string, id?: string) => (id ? { value, id } : { value })
 const m = (s: string, e: string) => [{ Name: 'StartDate', Value: s }, { Name: 'EndDate', Value: e }]
@@ -78,8 +78,12 @@ test('balance-sheet style report with month-end columns parses the same way', ()
   assert.deepEqual(r.rows.map((x) => x.label), ['ASSETS', 'Bank', 'TOTAL ASSETS'])
 })
 
-test('rejects a report with no value columns; window is first of month 11 months ago through today', () => {
+test('rejects a report with no value columns', () => {
   assert.throws(() => parseMonthlyReport({ Columns: { Column: [{ ColTitle: '' }] }, Rows: {} }), /no value columns/)
-  assert.deepEqual(reportWindow(new Date('2026-11-02T10:00:00Z'), 12), { start: '2025-12-01', end: '2026-11-02' })
-  assert.deepEqual(reportWindow(new Date('2026-03-15T10:00:00Z'), 12), { start: '2025-04-01', end: '2026-03-15' })
+})
+
+test('report range runs from 1 January 2024 to today', () => {
+  assert.equal(REPORTS_FROM, '2024-01-01')
+  assert.deepEqual(reportRange(new Date('2026-11-02T10:00:00Z')), { start: '2024-01-01', end: '2026-11-02' })
+  assert.deepEqual(reportRange(new Date('2027-03-15T23:59:00Z')), { start: '2024-01-01', end: '2027-03-15' })
 })
