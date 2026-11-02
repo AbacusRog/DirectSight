@@ -1,4 +1,4 @@
-import { authorise, connectUrl, json, type Env } from '../_lib/qbo'
+import { authorise, connectUrl, json, type Env } from '../_lib/qbo.ts'
 
 // POST /api/connect { label } (admin) -> { url } to send the browser to Intuit's consent screen.
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {

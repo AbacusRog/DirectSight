@@ -13,6 +13,21 @@ Shows each supplier's unpaid bills from QuickBooks Online, aged into Not yet due
 - Supplier rules live in `ac_supplier_rules`: due date, X days after bill date, fixed day each month, weekly run day, pay immediately, or hold. Weekend dates move to the Friday before (Monday if that has passed). UK bank holidays are not handled.
 - Access is admin only: the signed-in user needs a row in `user_roles` with role `admin` in the Clients project (checked by `is_admin()`, both in the database policies and in the Pages Functions). Log in with an account that exists in the Clients project's Auth users.
 
+## Giving a client access to their own company
+
+Admins (a `user_roles` row with role `admin` in the Clients project) see every company and can connect companies and check the QuickBooks keys. A **client login** is tied to specific companies and can do nothing else:
+
+- sees only that company's aged creditors, payment schedule and management report (no company picker, no Connections menu, no key check, no way to connect anything);
+- can press Refresh (pulls that company only) and, unless switched off, set supplier payment rules for that company.
+
+This is enforced twice, not just hidden on screen: row-level security in the database (`ac_client_access`, `ac_can_view()`, `ac_can_edit_rules()`) and a company check on every Pages Function. To add one:
+
+1. Supabase (Clients project) > Authentication > Users > add the client's email (invite, or create with a password).
+2. Run the insert at the bottom of `supabase/004_client_access.sql` with their email and the company's realm id (`can_edit_rules` false makes it view-only).
+3. They sign in at the same address as you.
+
+To remove access, run the delete in the same file. In Authentication settings, switching off "Allow new users to sign up" is a sensible extra, because anyone who signs up gets nothing but the login screen.
+
 ## Appearance
 
 Light and dark themes (the sun/moon button in the header). It follows the device setting until you choose, then remembers your choice. Reports always print in light. The look is a ledger-paper palette with Source Serif 4 for titles and figures and IBM Plex Sans for tables, both bundled with the app (no external font requests). Colours are CSS variables in `src/index.css`.

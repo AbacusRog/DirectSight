@@ -45,7 +45,7 @@ test('authorise explains each refusal', async () => {
 
     let n = 0
     globalThis.fetch = (async () => (++n === 1 ? new Response('{"id":"u"}') : new Response('false'))) as typeof fetch
-    assert.match((await authorise(withTok, env) as { error: string }).error, /not an admin/)
+    assert.match((await authorise(withTok, env) as { error: string }).error, /not been given access/)
 
     n = 0
     globalThis.fetch = (async () => (++n === 1 ? new Response('{"id":"u"}') : new Response('true'))) as typeof fetch

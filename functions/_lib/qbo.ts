@@ -76,10 +76,21 @@ function explainMismatch(env: Env, userToken: string): string {
   return hints.join(' ')
 }
 
-export type AuthResult = { who: 'staff' | 'cron' } | { error: string }
+export interface ClientAccess {
+  realm_id: string
+  can_edit_rules: boolean
+}
+/** 'staff' = signed-in admin (everything). 'client' = a client login, limited to the companies in `access`. */
+export type Authorised = { who: 'staff' } | { who: 'cron' } | { who: 'client'; access: ClientAccess[] }
+export type AuthResult = Authorised | { error: string }
+
+/** May this caller use this QuickBooks company? Admins and the daily job: any. Clients: only their own. */
+export function canUseRealm(a: Authorised, realm: string): boolean {
+  return a.who === 'client' ? a.access.some((x) => x.realm_id === realm) : true
+}
 
 /**
- * Allow either a signed-in admin (Supabase JWT) or the daily job (CRON_SECRET).
+ * Allow a signed-in admin, a client login that has been given a company, or the daily job (CRON_SECRET).
  * On refusal, says exactly why, because the usual cause is a Cloudflare variable from the wrong project.
  */
 export async function authorise(request: Request, env: Env): Promise<AuthResult> {
@@ -91,23 +102,30 @@ export async function authorise(request: Request, env: Env): Promise<AuthResult>
 
   if (env.CRON_SECRET && token === env.CRON_SECRET) return { who: 'cron' }
 
-  // 1. Is the user's JWT valid for THIS Supabase project?
+  // 1. Is the user's JWT valid for THIS Supabase project? (and who is it?)
   const user = await fetch(`${supaUrl(env)}/auth/v1/user`, {
     headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY.trim(), authorization: `Bearer ${token}` },
   })
   if (!user.ok) {
     return { error: `Supabase rejected your login (${user.status}). ${explainMismatch(env, token)}` }
   }
+  const userId = String(((await user.json().catch(() => ({}))) as { id?: string }).id ?? '')
 
-  // 2. Are they an admin? (is_admin() reads auth.uid() from user_roles.)
+  // 2. Admin? (is_admin() reads auth.uid() from user_roles.)
   const rpc = await fetch(`${supaUrl(env)}/rest/v1/rpc/is_admin`, {
     method: 'POST',
     headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY.trim(), authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: '{}',
   })
   if (!rpc.ok) return { error: `Admin check failed (${rpc.status}): ${(await rpc.text()).slice(0, 160)}` }
-  if ((await rpc.json()) !== true) return { error: 'You are signed in, but this login is not an admin in the Clients project (user_roles).' }
-  return { who: 'staff' } // 'staff' = signed-in admin
+  if ((await rpc.json()) === true) return { who: 'staff' }
+
+  // 3. Not an admin: is this a client login that has been given a company?
+  if (/^[0-9a-f-]{36}$/i.test(userId)) {
+    const rows = await sb(env, `ac_client_access?user_id=eq.${userId}&select=realm_id,can_edit_rules`)
+    if (Array.isArray(rows) && rows.length) return { who: 'client', access: rows as ClientAccess[] }
+  }
+  return { error: 'This login has not been given access to any company. Ask Abacus to set it up.' }
 }
 
 export interface Connection {

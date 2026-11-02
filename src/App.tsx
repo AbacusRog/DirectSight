@@ -54,6 +54,14 @@ function Main() {
   const [notice, setNotice] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [menu, setMenu] = useState(false)
+  // Who is signed in. Until the server answers, assume the most restricted view.
+  const [me, setMe] = useState<{ role: 'admin' | 'client'; access: { realm_id: string; can_edit_rules: boolean }[] } | null>(null)
+  useEffect(() => {
+    api<{ role: 'admin' | 'client'; access: { realm_id: string; can_edit_rules: boolean }[] }>('/api/me')
+      .then(setMe)
+      .catch((e) => setError(e.message))
+  }, [])
+  const isAdmin = me?.role === 'admin'
 
   // Result of the QuickBooks consent redirect (?connected=… / ?connect_error=…)
   useEffect(() => {
@@ -206,6 +214,7 @@ function Main() {
       notes: null,
     }
 
+  const canEditRules = isAdmin || !!me?.access.find((x) => x.realm_id === realm)?.can_edit_rules
   const overdue = totals.total - totals.current
   const late60 = totals.d61_90 + totals.d91plus
   const AGE_CLASS = { d1_30: 'age-1', d31_60: 'age-2', d61_90: 'age-3', d91plus: 'age-4' } as const
@@ -220,7 +229,7 @@ function Main() {
     <div className="mx-auto max-w-7xl space-y-5 px-4 py-5 sm:px-6">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <Brand />
-        {companies.length > 0 && (
+        {isAdmin && companies.length > 0 && (
           <select value={realm} onChange={(e) => setRealm(e.target.value)} className="field sm:ml-3" aria-label="Company">
             {companies.map((c) => (
               <option key={c.realm_id} value={c.realm_id}>
@@ -228,6 +237,9 @@ function Main() {
               </option>
             ))}
           </select>
+        )}
+        {!isAdmin && companies.length > 0 && (
+          <span className="font-serif text-[1.0625rem] text-muted sm:ml-3">{companies[0].company_name ?? companies[0].label}</span>
         )}
         <div className="ml-auto flex flex-wrap items-center gap-2 print:hidden">
           {tab !== 'reports' && (
@@ -240,6 +252,7 @@ function Main() {
               </button>
             </>
           )}
+          {isAdmin && (
           <div className="relative">
             <button className="btn" onClick={() => setMenu((m) => !m)} aria-expanded={menu} aria-haspopup="menu">
               Connections
@@ -263,6 +276,7 @@ function Main() {
               </>
             )}
           </div>
+          )}
           <ThemeToggle />
           <button onClick={() => supabase.auth.signOut()} className="btn btn-quiet">Sign out</button>
         </div>
@@ -271,7 +285,14 @@ function Main() {
       {notice && <div className="notice notice-ok">{notice}</div>}
       {error && <div className="notice notice-error">{error}</div>}
 
-      {companies.length === 0 && !error && (
+      {companies.length === 0 && !error && me && !isAdmin && (
+        <div className="panel p-6">
+          <h2 className="text-lg">No company set up</h2>
+          <p className="mt-1 max-w-prose text-muted">This login has not been given a company yet. Contact Abacus and we will set it up.</p>
+        </div>
+      )}
+
+      {companies.length === 0 && !error && isAdmin && (
         <div className="panel flex flex-col items-start gap-3 p-6">
           <h2 className="text-lg">Connect a QuickBooks company</h2>
           <p className="max-w-prose text-muted">
@@ -360,15 +381,19 @@ function Main() {
                       )}
                     </td>
                     <td className="whitespace-nowrap">
-                      <button
-                        className="text-left text-pen underline-offset-2 hover:underline"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setEditing(newRule(v))
-                        }}
-                      >
-                        {describeRule(rules[v.vendor_id])}
-                      </button>
+                      {canEditRules ? (
+                        <button
+                          className="text-left text-pen underline-offset-2 hover:underline"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setEditing(newRule(v))
+                          }}
+                        >
+                          {describeRule(rules[v.vendor_id])}
+                        </button>
+                      ) : (
+                        <span>{describeRule(rules[v.vendor_id])}</span>
+                      )}
                     </td>
                   </tr>
                   {open === v.vendor_id && (
