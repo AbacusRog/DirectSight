@@ -13,6 +13,12 @@ Shows each supplier's unpaid bills from QuickBooks Online, aged into Not yet due
 - Supplier rules live in `ac_supplier_rules`: due date, X days after bill date, fixed day each month, weekly run day, pay immediately, or hold. Weekend dates move to the Friday before (Monday if that has passed). UK bank holidays are not handled.
 - Access is admin only: the signed-in user needs a row in `user_roles` with role `admin` in the Clients project (checked by `is_admin()`, both in the database policies and in the Pages Functions). Log in with an account that exists in the Clients project's Auth users.
 
+## Management report
+
+The **Management report** tab shows the last 13 months of **Profit and loss** and **Balance sheet** from QuickBooks (accrual or cash basis), either side by side (**All months**) or **Compare months**: pick any two months, or use *Latest vs previous month* / *Latest vs same month last year*. It shows the change in £ and %. Empty lines are hidden by default, and **Print** gives a clean page (use the browser's Save as PDF).
+
+Data is pulled with `POST /api/report-sync` (QuickBooks `ProfitAndLoss` / `BalanceSheet` reports summarised by month), cached in `ac_reports`, and refreshed on open if older than an hour. The balance sheet shows balances at each month end; the latest column is as at today.
+
 ## Cloudflare Pages setup
 
 Build command `npm run build`, output directory `dist`. Variables (see `.env.example`):

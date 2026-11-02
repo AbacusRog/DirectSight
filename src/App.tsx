@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import type { Session } from '@supabase/supabase-js'
 import Login from './Login'
 import RuleEditor from './RuleEditor'
+import Reports from './Reports'
 import { api, configMissing, fmtDate, gbp, supabase } from './lib/supabase'
 import { describeRule, suggestForSupplier } from './lib/paymentDates'
 import { BUCKETS, type Company, type Snapshot, type SupplierRule, type VendorBalance } from './lib/types'
@@ -45,7 +46,7 @@ function Main() {
   const [rules, setRules] = useState<Record<string, SupplierRule>>({})
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'aged' | 'schedule'>('aged')
+  const [tab, setTab] = useState<'aged' | 'schedule' | 'reports'>('aged')
   const [open, setOpen] = useState<string | null>(null)
   const [editing, setEditing] = useState<SupplierRule | null>(null)
   const loadedRealm = useRef('')
@@ -224,6 +225,8 @@ function Main() {
         <button onClick={connect} disabled={connecting} className="px-3 py-2 rounded-lg border bg-white disabled:opacity-50">
           {connecting ? 'Opening QuickBooks…' : 'Connect a company'}
         </button>
+        {tab !== 'reports' && (
+          <>
         <span className="text-sm text-slate-500">
           {snap ? `Updated ${new Date(snap.fetched_at).toLocaleString('en-GB')}` : 'No data yet'}
         </span>
@@ -234,6 +237,8 @@ function Main() {
         >
           {syncing ? 'Refreshing…' : 'Refresh'}
         </button>
+          </>
+        )}
         <button onClick={() => supabase.auth.signOut()} className="px-3 py-2 rounded-lg border bg-white">
           Sign out
         </button>
@@ -248,24 +253,28 @@ function Main() {
         </div>
       )}
 
+      {tab !== 'reports' && (
       <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card label="Total owed" value={gbp(totals.total)} />
         <Card label="Overdue" value={gbp(overdue)} />
         <Card label="Over 60 days overdue" value={gbp(totals.d61_90 + totals.d91plus)} />
         <Card label="Suppliers" value={String(rows.length)} />
       </section>
+      )}
 
       <nav className="flex gap-2">
-        {(['aged', 'schedule'] as const).map((t) => (
+        {(['aged', 'schedule', 'reports'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={`px-4 py-2 rounded-lg ${tab === t ? 'bg-slate-900 text-white' : 'bg-white border'}`}
           >
-            {t === 'aged' ? 'Aged creditors' : 'Payment schedule'}
+            {t === 'aged' ? 'Aged creditors' : t === 'schedule' ? 'Payment schedule' : 'Management report'}
           </button>
         ))}
       </nav>
+
+      {tab === 'reports' && realm && <Reports realm={realm} />}
 
       {tab === 'aged' && (
         <div className="bg-white rounded-xl shadow overflow-x-auto">

@@ -110,7 +110,7 @@ export async function authorise(request: Request, env: Env): Promise<AuthResult>
   return { who: 'staff' } // 'staff' = signed-in admin
 }
 
-interface Connection {
+export interface Connection {
   realm_id: string
   label: string
   company_name: string | null
@@ -120,13 +120,13 @@ interface Connection {
   refresh_expires_at: string
 }
 
-async function loadConnection(env: Env, realm: string): Promise<Connection> {
+export async function loadConnection(env: Env, realm: string): Promise<Connection> {
   const rows = await sb(env, `ac_connections?realm_id=eq.${encodeURIComponent(realm)}&select=*`)
   if (!rows?.length) throw new Error('No QuickBooks connection for that company')
   return rows[0]
 }
 
-async function logCall(env: Env, realm: string, endpoint: string, status: number, tid: string | null, message?: string) {
+export async function logCall(env: Env, realm: string, endpoint: string, status: number, tid: string | null, message?: string) {
   try {
     await sb(
       env,
@@ -139,7 +139,7 @@ async function logCall(env: Env, realm: string, endpoint: string, status: number
   }
 }
 
-async function refresh(env: Env, conn: Connection): Promise<Connection> {
+export async function refresh(env: Env, conn: Connection): Promise<Connection> {
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: {
