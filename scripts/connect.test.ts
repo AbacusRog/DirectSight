@@ -41,7 +41,7 @@ test('authorise explains each refusal', async () => {
   const realFetch = globalThis.fetch
   try {
     globalThis.fetch = (async () => new Response('{}', { status: 401 })) as typeof fetch
-    assert.match((await authorise(withTok, env) as { error: string }).error, /same project/)
+    assert.match((await authorise(withTok, env) as { error: string }).error, /Supabase rejected your login \(401\)/)
 
     let n = 0
     globalThis.fetch = (async () => (++n === 1 ? new Response('{"id":"u"}') : new Response('false'))) as typeof fetch
@@ -50,6 +50,29 @@ test('authorise explains each refusal', async () => {
     n = 0
     globalThis.fetch = (async () => (++n === 1 ? new Response('{"id":"u"}') : new Response('true'))) as typeof fetch
     assert.deepEqual(await authorise(withTok, env), { who: 'staff' })
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+function jwt(payload: object) {
+  const b = (o: object) => btoa(JSON.stringify(o)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')
+  return `${b({ alg: 'HS256' })}.${b(payload)}.sig`
+}
+test('authorise names the mismatched project', async () => {
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response('{}', { status: 401 })) as typeof fetch
+  try {
+    const user = jwt({ iss: 'https://clientsref.supabase.co/auth/v1' })
+    const req = new Request('https://x/api/companies', { headers: { authorization: `Bearer ${user}` } })
+    const wrongKey = { ...env, SUPABASE_URL: 'https://clientsref.supabase.co', SUPABASE_SERVICE_ROLE_KEY: jwt({ ref: 'abacusref', role: 'service_role' }) } as Env
+    assert.match((await authorise(req, wrongKey) as { error: string }).error, /belongs to project abacusref, not clientsref/)
+    const wrongUrl = { ...env, SUPABASE_URL: 'https://abacusref.supabase.co', SUPABASE_SERVICE_ROLE_KEY: jwt({ ref: 'abacusref', role: 'service_role' }) } as Env
+    assert.match((await authorise(req, wrongUrl) as { error: string }).error, /signed in to project clientsref, but SUPABASE_URL is project abacusref/)
+    const anon = { ...env, SUPABASE_URL: 'https://clientsref.supabase.co', SUPABASE_SERVICE_ROLE_KEY: jwt({ ref: 'clientsref', role: 'anon' }) } as Env
+    assert.match((await authorise(req, anon) as { error: string }).error, /'anon' key, not the service_role key/)
+    const newStyle = { ...env, SUPABASE_URL: 'https://clientsref.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'sb_secret_abc' } as Env
+    assert.match((await authorise(req, newStyle) as { error: string }).error, /not a legacy JWT key/)
   } finally {
     globalThis.fetch = realFetch
   }

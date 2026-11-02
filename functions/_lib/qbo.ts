@@ -42,6 +42,40 @@ export async function sb(env: Env, path: string, init: RequestInit = {}, extra: 
   return text ? JSON.parse(text) : null
 }
 
+
+function claims(jwt: string): Record<string, unknown> | null {
+  try {
+    const part = jwt.split('.')[1]
+    return JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/'))) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+/** Compares the project in SUPABASE_URL, in the service key and in the user's login token. Project refs are not secret. */
+function explainMismatch(env: Env, userToken: string): string {
+  const key = env.SUPABASE_SERVICE_ROLE_KEY.trim()
+  const urlRef = (() => {
+    try {
+      return new URL(supaUrl(env)).hostname.split('.')[0]
+    } catch {
+      return null
+    }
+  })()
+  const userRef = String(claims(userToken)?.iss ?? '').match(/^https:\/\/([^.]+)\./)?.[1]
+  const k = claims(key)
+  const hints: string[] = []
+  if (!urlRef) hints.push('SUPABASE_URL is not a valid URL.')
+  if (userRef && urlRef && userRef !== urlRef) hints.push(`You signed in to project ${userRef}, but SUPABASE_URL is project ${urlRef}.`)
+  if (!k) hints.push("SUPABASE_SERVICE_ROLE_KEY is not a legacy JWT key (it should start with 'eyJ'; use the 'service_role' key under Supabase > Settings > API Keys > Legacy API Keys).")
+  else {
+    if (k.ref && urlRef && k.ref !== urlRef) hints.push(`SUPABASE_SERVICE_ROLE_KEY belongs to project ${String(k.ref)}, not ${urlRef}.`)
+    if (k.role && k.role !== 'service_role') hints.push(`SUPABASE_SERVICE_ROLE_KEY is the '${String(k.role)}' key, not the service_role key.`)
+  }
+  if (!hints.length) hints.push(`SUPABASE_URL, the key and your login all look like project ${urlRef}: re-paste the service_role key (check for a stray space or a cut-off copy) and redeploy.`)
+  return hints.join(' ')
+}
+
 export type AuthResult = { who: 'staff' | 'cron' } | { error: string }
 
 /**
@@ -62,9 +96,7 @@ export async function authorise(request: Request, env: Env): Promise<AuthResult>
     headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY.trim(), authorization: `Bearer ${token}` },
   })
   if (!user.ok) {
-    return {
-      error: `Supabase rejected your login (${user.status}). SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must belong to the same project you sign in to (VITE_SUPABASE_URL = Clients).`,
-    }
+    return { error: `Supabase rejected your login (${user.status}). ${explainMismatch(env, token)}` }
   }
 
   // 2. Are they an admin? (is_admin() reads auth.uid() from user_roles.)
