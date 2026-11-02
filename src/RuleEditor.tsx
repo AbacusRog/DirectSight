@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { WEEKDAYS } from './lib/paymentDates'
 import type { SupplierRule, TermsType } from './lib/types'
 
@@ -22,6 +22,13 @@ export default function RuleEditor({
   const [r, setR] = useState<SupplierRule>(rule)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Escape closes the dialog
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   async function save() {
     setBusy(true)
@@ -50,7 +57,7 @@ export default function RuleEditor({
 
         <label className="block text-sm">
           <span className="text-muted">When do you pay this supplier?</span>
-          <select value={r.terms_type} onChange={(e) => setR({ ...r, terms_type: e.target.value as TermsType })} className="field mt-1 w-full">
+          <select autoFocus value={r.terms_type} onChange={(e) => setR({ ...r, terms_type: e.target.value as TermsType })} className="field mt-1 w-full">
             {OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}

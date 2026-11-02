@@ -5,3 +5,5 @@ dist
 !.env.example
 .dev.vars
 .wrangler
+
+*.tsbuildinfo

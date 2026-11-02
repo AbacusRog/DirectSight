@@ -6,7 +6,7 @@ import { onRequestGet as qboCheck } from '../functions/api/qbo-check.ts'
 import { onRequestPost as connect } from '../functions/api/connect.ts'
 import { onRequestPost as sync } from '../functions/api/sync.ts'
 import { onRequestPost as reportSync } from '../functions/api/report-sync.ts'
-import { canUseRealm, type Env } from '../functions/_lib/qbo.ts'
+import { authorise, canUseRealm, connectUrl, completeConnect, safeEqual, type Env } from '../functions/_lib/qbo.ts'
 
 const env = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k'.repeat(40), QBO_CLIENT_ID: 'a', QBO_CLIENT_SECRET: 'b' } as Env
 const UID = '11111111-2222-3333-4444-555555555555'
@@ -14,7 +14,7 @@ const MINE = '111'
 const OTHER = '222'
 
 /** Pretend to be Supabase (and QuickBooks). Records every URL called. */
-function pretend(opts: { admin?: boolean; access?: { realm_id: string; can_edit_rules: boolean }[] }) {
+function pretend(opts: { admin?: boolean; access?: { realm_id: string; can_edit_rules: boolean }[]; snapshotAt?: string; reportAt?: { fetched_at: string; start_date: string } }) {
   const calls: string[] = []
   globalThis.fetch = (async (url: unknown) => {
     const u = String(url)
@@ -22,6 +22,8 @@ function pretend(opts: { admin?: boolean; access?: { realm_id: string; can_edit_
     if (u.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: UID }))
     if (u.includes('/rpc/is_admin')) return new Response(JSON.stringify(!!opts.admin))
     if (u.includes('/rest/v1/ac_client_access')) return new Response(JSON.stringify(opts.access ?? []))
+    if (u.includes('/rest/v1/ac_snapshots') && opts.snapshotAt) return new Response(JSON.stringify([{ fetched_at: opts.snapshotAt }]))
+    if (u.includes('/rest/v1/ac_reports') && opts.reportAt) return new Response(JSON.stringify([opts.reportAt]))
     if (u.includes('/rest/v1/ac_connections')) return new Response(JSON.stringify([{ realm_id: MINE, label: 'direct', company_name: 'Direct Sight' }]))
     return new Response('[]')
   }) as typeof fetch
@@ -112,4 +114,62 @@ test('canUseRealm', () => {
   assert.equal(canUseRealm({ who: 'cron' }, OTHER), true)
   assert.equal(canUseRealm({ who: 'client', access: clientOf(MINE).access }, MINE), true)
   assert.equal(canUseRealm({ who: 'client', access: clientOf(MINE).access }, OTHER), false)
+})
+
+const secondsAgo = (n: number) => new Date(Date.now() - n * 1000).toISOString()
+
+test('a client who refreshed seconds ago gets the saved copy, with no QuickBooks call', async () => {
+  const calls = pretend({ ...clientOf(MINE), snapshotAt: secondsAgo(10) })
+  const res = await sync(ctx('/api/sync', { realm_id: MINE }))
+  assert.equal(res.status, 200)
+  assert.equal(((await res.json()) as { cached?: boolean }).cached, true)
+  assert.deepEqual(quickbooksCalls(calls), [])
+})
+
+test('after the cooldown a client can refresh again; admins are never limited', async () => {
+  pretend({ ...clientOf(MINE), snapshotAt: secondsAgo(600) })
+  assert.notEqual(((await (await sync(ctx('/api/sync', { realm_id: MINE }))).json()) as { cached?: boolean }).cached, true)
+  pretend({ admin: true, snapshotAt: secondsAgo(5) })
+  assert.notEqual(((await (await sync(ctx('/api/sync', { realm_id: MINE }))).json()) as { cached?: boolean }).cached, true)
+})
+
+test('report refresh has the same limit, except a copy saved before the 2024 history was added', async () => {
+  const calls = pretend({ ...clientOf(MINE), reportAt: { fetched_at: secondsAgo(10), start_date: '2024-01-01' } })
+  const res = await reportSync(ctx('/api/report-sync', { realm_id: MINE, kind: 'pnl' }))
+  assert.equal(((await res.json()) as { cached?: boolean }).cached, true)
+  assert.deepEqual(quickbooksCalls(calls), [])
+  pretend({ ...clientOf(MINE), reportAt: { fetched_at: secondsAgo(10), start_date: '2025-12-01' } })
+  const old = await reportSync(ctx('/api/report-sync', { realm_id: MINE, kind: 'pnl' }))
+  assert.notEqual(((await old.json()) as { cached?: boolean }).cached, true)
+})
+
+test('a client never sees internal error detail; an admin does', async () => {
+  pretend(clientOf(MINE))
+  const c = (await (await sync(ctx('/api/sync', { realm_id: MINE }))).json()) as { error: string }
+  assert.match(c.error, /try again in a few minutes/)
+  assert.doesNotMatch(c.error, /AgedPayableDetail|Supabase|layout/)
+  pretend({ admin: true })
+  const a = (await (await sync(ctx('/api/sync', { realm_id: MINE }))).json()) as { error: string }
+  assert.match(a.error, /AgedPayableDetail|QuickBooks/)
+})
+
+test('secret comparison and the daily-job secret', async () => {
+  assert.equal(safeEqual('abc', 'abc'), true)
+  assert.equal(safeEqual('abc', 'abd'), false)
+  assert.equal(safeEqual('abc', 'abcd'), false)
+  assert.equal(safeEqual('', ''), true)
+  const cronEnv = { ...env, CRON_SECRET: 'x'.repeat(40) } as Env
+  const withTok = (t: string) => new Request('https://x/api/sync', { headers: { authorization: `Bearer ${t}` } })
+  assert.deepEqual(await authorise(withTok('x'.repeat(40)), cronEnv), { who: 'cron' })
+  pretend({ access: [] })
+  assert.ok('error' in (await authorise(withTok('x'.repeat(39) + 'y'), cronEnv)))
+})
+
+test('the connect link can be signed with its own secret, and a link signed with the database key no longer works', async () => {
+  const req = new Request('https://aged.example.com/api/connect', { method: 'POST' })
+  const withOwn = { ...env, STATE_SECRET: 's'.repeat(32) } as Env
+  const stateOwn = new URL(await connectUrl(withOwn, req, 'Client')).searchParams.get('state')!
+  const stateDb = new URL(await connectUrl(env, req, 'Client')).searchParams.get('state')!
+  await assert.rejects(completeConnect(withOwn, req, 'c', '123', stateDb), /expired/) // signed with the old key
+  await assert.rejects(completeConnect(env, req, 'c', '123', stateOwn), /expired/) // not valid without the secret
 })

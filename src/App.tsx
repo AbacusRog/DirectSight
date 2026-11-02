@@ -357,10 +357,19 @@ function Main() {
                 <Fragment key={v.vendor_id}>
                   <tr className="click" onClick={() => setOpen(open === v.vendor_id ? null : v.vendor_id)}>
                     <td className="min-w-[12rem] font-medium">
-                      <span className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 text-left"
+                        aria-expanded={open === v.vendor_id}
+                        aria-label={`${v.name}: show bills`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setOpen(open === v.vendor_id ? null : v.vendor_id)
+                        }}
+                      >
                         {chevron(open === v.vendor_id)}
                         {v.name}
-                      </span>
+                      </button>
                     </td>
                     <td><AgeBar buckets={v.buckets} /></td>
                     {BUCKETS.map((b) => (

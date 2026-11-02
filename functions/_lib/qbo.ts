@@ -8,6 +8,8 @@ export interface Env {
   QBO_CLIENT_ID: string
   QBO_CLIENT_SECRET: string
   CRON_SECRET?: string
+  /** Optional. Signs the QuickBooks connect link. Falls back to the Supabase service key if unset. */
+  STATE_SECRET?: string
 }
 
 const TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer'
@@ -16,7 +18,7 @@ const API_BASE = 'https://quickbooks.api.intuit.com/v3/company'
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
   })
 }
 
@@ -81,6 +83,16 @@ export interface ClientAccess {
   can_edit_rules: boolean
 }
 /** 'staff' = signed-in admin (everything). 'client' = a client login, limited to the companies in `access`. */
+/** Compare secrets without leaking how many leading characters matched. */
+export function safeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder()
+  const x = enc.encode(a)
+  const y = enc.encode(b)
+  let diff = x.length ^ y.length
+  for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0)
+  return diff === 0
+}
+
 export type Authorised = { who: 'staff' } | { who: 'cron' } | { who: 'client'; access: ClientAccess[] }
 export type AuthResult = Authorised | { error: string }
 
@@ -100,7 +112,7 @@ export async function authorise(request: Request, env: Env): Promise<AuthResult>
   const token = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
   if (!token) return { error: 'Not signed in (no login token sent).' }
 
-  if (env.CRON_SECRET && token === env.CRON_SECRET) return { who: 'cron' }
+  if (env.CRON_SECRET && safeEqual(token, env.CRON_SECRET)) return { who: 'cron' }
 
   // 1. Is the user's JWT valid for THIS Supabase project? (and who is it?)
   const user = await fetch(`${supaUrl(env)}/auth/v1/user`, {
@@ -148,7 +160,7 @@ export async function logCall(env: Env, realm: string, endpoint: string, status:
   try {
     await sb(
       env,
-      'qbo_api_log',
+      'ac_api_log',
       { method: 'POST', body: JSON.stringify({ realm_id: realm, endpoint, status, intuit_tid: tid, message: message?.slice(0, 500) ?? null }) },
       { prefer: 'return=minimal' },
     )
@@ -321,7 +333,7 @@ const b64url = (buf: ArrayBuffer | Uint8Array) =>
   btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
 async function hmac(env: Env, data: string): Promise<string> {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.SUPABASE_SERVICE_ROLE_KEY), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.STATE_SECRET || env.SUPABASE_SERVICE_ROLE_KEY), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   return b64url(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data)))
 }
 
@@ -457,4 +469,26 @@ export async function checkCredentials(env: Env) {
         ? 'OK: Intuit accepts this ID + secret pair (it only refused the dummy token, as expected). If Connect still fails, the problem is elsewhere.'
         : 'Unexpected reply from Intuit.'
   return out
+}
+
+// ---- Abuse limits and error hygiene -----------------------------------------------------------------
+
+/** A client may trigger a QuickBooks refresh at most once in this many seconds (admins are not limited). */
+export const CLIENT_COOLDOWN_SECONDS = 120
+
+/** When the cached copy was fetched, if that was within `seconds` (so a refresh can be skipped); else null. */
+export async function fetchedWithin(env: Env, path: string, seconds: number, mustStartOnOrBefore?: string): Promise<string | null> {
+  const rows = (await sb(env, path)) as { fetched_at?: string; start_date?: string }[] | null
+  const row = rows?.[0]
+  if (!row?.fetched_at) return null
+  if (mustStartOnOrBefore && row.start_date && row.start_date > mustStartOnOrBefore) return null // saved before the history was extended
+  return Date.now() - new Date(row.fetched_at).getTime() < seconds * 1000 ? row.fetched_at : null
+}
+
+/** Admins see the real error; a client gets a plain message, with the detail kept in the server log. */
+export function failure(a: AuthResult | null, e: unknown, status: number): Response {
+  const detail = (e as Error)?.message ?? String(e)
+  console.error('DirectSight API error:', detail)
+  const isClient = a !== null && !('error' in a) && a.who === 'client'
+  return json({ error: isClient ? 'Something went wrong talking to QuickBooks. Please try again in a few minutes.' : detail }, status)
 }

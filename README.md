@@ -28,6 +28,17 @@ This is enforced twice, not just hidden on screen: row-level security in the dat
 
 To remove access, run the delete in the same file. In Authentication settings, switching off "Allow new users to sign up" is a sensible extra, because anyone who signs up gets nothing but the login screen.
 
+## Security
+
+- **Who can see what:** enforced in the database (row-level security) and again on every API call. A client login can reach only its own company; anonymous visitors get nothing. Checked by impersonating a real client login against every table, view and function in the Clients project, not just by reading policies.
+- **Tokens:** QuickBooks tokens live in `ac_connections`, which has RLS on and no policies, so only the server (service role) can read them. Never expose that table.
+- **Limits:** a client can refresh at most once every 2 minutes (`CLIENT_COOLDOWN_SECONDS`), to protect the QuickBooks allowance. Clients get plain error messages; the detail goes to the server log.
+- **Headers:** `public/_headers` sets a strict Content-Security-Policy (no inline scripts), no framing, no content sniffing, HSTS and a tight referrer policy. If you add a third-party script, font or API, add its address to the policy there.
+- **Call log:** every QuickBooks call is recorded in `ac_api_log` (status and Intuit transaction id).
+- **Secrets** (Cloudflare Secrets, never in the repo): `SUPABASE_SERVICE_ROLE_KEY`, `QBO_CLIENT_SECRET`, `CRON_SECRET`, and optionally `STATE_SECRET` (signs the Connect link; recommended).
+- **Recommended Supabase settings:** turn on leaked-password protection and turn off "Allow new users to sign up" (Authentication settings).
+- **Checks:** CI (`.github/workflows/ci.yml`) runs the type checks, tests and build on every push.
+
 ## Appearance
 
 Light and dark themes (the sun/moon button in the header). It follows the device setting until you choose, then remembers your choice. Reports always print in light. The look is a ledger-paper palette with Source Serif 4 for titles and figures and IBM Plex Sans for tables, both bundled with the app (no external font requests). Colours are CSS variables in `src/index.css`.
