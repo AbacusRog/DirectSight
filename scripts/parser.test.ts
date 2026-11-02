@@ -67,3 +67,57 @@ test('groups by vendor, buckets by due date, keeps credits, skips zero balances'
 test('rejects an unexpected layout', () => {
   assert.throws(() => parseAgedPayableDetail({ Columns: { Column: [{ ColTitle: 'Foo' }] }, Rows: { Row: [] } }, '2026-11-02'))
 })
+
+// Layout where the supplier is the SECTION HEADING (no Vendor column) and columns carry ColKey metadata.
+const meta = (key: string) => [{ Name: 'ColKey', Value: key }]
+const grouped = {
+  Columns: {
+    Column: [
+      { ColTitle: 'Date', MetaData: meta('tx_date') },
+      { ColTitle: 'Transaction type', MetaData: meta('txn_type') },
+      { ColTitle: 'No.', MetaData: meta('doc_num') },
+      { ColTitle: 'Due date', MetaData: meta('due_date') },
+      { ColTitle: 'Amount', MetaData: meta('subt_nat_amount') },
+      { ColTitle: 'Open balance', MetaData: meta('rbal_nat_amount') },
+    ],
+  },
+  Rows: {
+    Row: [
+      {
+        type: 'Section',
+        Header: { ColData: [{ value: 'Acme Ltd', id: '5' }] },
+        Rows: {
+          Row: [
+            { type: 'Data', ColData: [col('2026-06-01'), col('Bill', '12'), col('INV2'), col('2026-07-01'), col('1,000.00'), col('1,000.00')] },
+            { type: 'Data', ColData: [col('2026-10-20'), col('Bill', '11'), col('INV1'), col('2026-11-19'), col('400.00'), col('400.00')] },
+          ],
+        },
+        Summary: { ColData: [col('Total for Acme Ltd')] },
+      },
+      {
+        type: 'Section',
+        Header: { ColData: [{ value: 'Bolt & Co', id: '6' }] },
+        Rows: { Row: [{ type: 'Data', ColData: [col('2026-09-20'), col('Bill', '15'), col('B1'), col('2026-10-25'), col('75.25'), col('75.25')] }] },
+      },
+    ],
+  },
+}
+
+test('supplier taken from the section heading when there is no Vendor column; thousands separators handled', () => {
+  const r = parseAgedPayableDetail(grouped, '2026-11-02')
+  assert.equal(r.vendors.length, 2)
+  const acme = r.vendors.find((v) => v.vendor_id === '5')!
+  assert.equal(acme.name, 'Acme Ltd')
+  assert.equal(acme.total, 1400)
+  assert.equal(acme.buckets.d91plus, 1000)
+  assert.equal(acme.buckets.current, 400)
+  assert.equal(r.vendors.find((v) => v.name === 'Bolt & Co')!.buckets.d1_30, 75.25)
+})
+
+test('empty report gives no suppliers; bad layout error lists the columns QuickBooks sent', () => {
+  assert.deepEqual(parseAgedPayableDetail({ Columns: grouped.Columns, Rows: {} }, '2026-11-02').vendors, [])
+  assert.throws(
+    () => parseAgedPayableDetail({ Columns: { Column: [{ ColTitle: 'Foo' }, { ColTitle: 'Bar' }] }, Rows: { Row: [] } }, '2026-11-02'),
+    /got: Foo, Bar/,
+  )
+})

@@ -188,7 +188,7 @@ async function fetchReport(env: Env, realm: string, conn: Connection, asOf: stri
 type QboCol = { value?: string; id?: string }
 type QboRow = { type?: string; ColData?: QboCol[]; Rows?: { Row?: QboRow[] }; Header?: { ColData?: QboCol[] } }
 interface QboReport {
-  Columns?: { Column?: { ColTitle?: string; ColType?: string }[] }
+  Columns?: { Column?: { ColTitle?: string; ColType?: string; MetaData?: { Name?: string; Value?: string }[] }[] }
   Rows?: { Row?: QboRow[] }
 }
 
@@ -203,17 +203,29 @@ function bucketFor(daysOverdue: number): BucketKey {
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100
+// Section headings that describe an ageing bucket or a total rather than a supplier.
+const NOT_A_SUPPLIER = /past due|^current$|^total|days|or more|^\s*$/i
 
 export function parseAgedPayableDetail(report: QboReport, asOf: string) {
-  const titles = (report.Columns?.Column ?? []).map((c) => (c.ColTitle ?? '').toLowerCase())
-  const idx = (needle: string) => titles.findIndex((t) => t.includes(needle))
-  const iDate = titles.findIndex((t) => t === 'date')
-  const iType = idx('transaction type')
-  const iNum = idx('num')
-  const iVendor = idx('vendor')
-  const iDue = idx('due date')
-  const iOpen = idx('open balance')
-  if (iVendor < 0 || iDue < 0 || iOpen < 0) throw new Error('Unexpected AgedPayableDetail layout from QuickBooks')
+  const cols = report.Columns?.Column ?? []
+  const titles = cols.map((c) => (c.ColTitle ?? '').trim().toLowerCase())
+  const keys = cols.map((c) => (c.MetaData?.find((m) => m.Name === 'ColKey')?.Value ?? '').toLowerCase())
+  // Find a column by QuickBooks' own key first, then by title.
+  const find = (keyTest: (k: string) => boolean, titleTest: (t: string) => boolean) => {
+    const byKey = keys.findIndex((k) => k && keyTest(k))
+    return byKey >= 0 ? byKey : titles.findIndex((t) => t && titleTest(t))
+  }
+  const iDate = find((k) => k === 'tx_date', (t) => t === 'date')
+  const iType = find((k) => k === 'txn_type', (t) => t.includes('transaction type') || t === 'type')
+  const iNum = find((k) => k === 'doc_num', (t) => t === 'num' || t === 'no.' || t.includes('number'))
+  const iVendor = find((k) => k === 'vend_name', (t) => t.includes('vendor') || t.includes('supplier'))
+  const iDue = find((k) => k === 'due_date', (t) => t.includes('due date') || t === 'due')
+  const iOpen = find((k) => k.startsWith('rbal'), (t) => t.includes('open balance') || t === 'balance')
+
+  if (iDue < 0 || iOpen < 0) {
+    const seen = cols.map((c, i) => c.ColTitle || keys[i] || '(blank)').join(', ')
+    throw new Error(`Unexpected AgedPayableDetail layout from QuickBooks. Needed a due date and an open balance column; got: ${seen || 'no columns'}.`)
+  }
 
   const asOfMs = Date.UTC(+asOf.slice(0, 4), +asOf.slice(5, 7) - 1, +asOf.slice(8, 10))
   const vendors = new Map<
@@ -221,15 +233,20 @@ export function parseAgedPayableDetail(report: QboReport, asOf: string) {
     { vendor_id: string; name: string; total: number; buckets: Record<BucketKey, number>; bills: unknown[] }
   >()
 
-  const walk = (rows: QboRow[] | undefined) => {
+  const walk = (rows: QboRow[] | undefined, ctx: { id: string; name: string } | null) => {
     for (const r of rows ?? []) {
-      if (r.Rows?.Row) walk(r.Rows.Row)
+      // When there is no vendor column, the supplier is the section heading (e.g. "Acme Ltd").
+      let here = ctx
+      const head = r.Header?.ColData?.[0]
+      if (head?.value && !NOT_A_SUPPLIER.test(head.value)) here = { id: head.id || `name:${head.value}`, name: head.value.trim() }
+      if (r.Rows?.Row) walk(r.Rows.Row, here)
       if (r.type !== 'Data' || !r.ColData) continue
       const c = r.ColData
-      const open = parseFloat(c[iOpen]?.value ?? '')
+      const open = parseFloat((c[iOpen]?.value ?? '').replace(/,/g, ''))
       if (!isFinite(open) || open === 0) continue
-      const name = (c[iVendor]?.value ?? '').trim() || '(No supplier)'
-      const vid = c[iVendor]?.id || `name:${name}`
+      const colName = iVendor >= 0 ? (c[iVendor]?.value ?? '').trim() : ''
+      const name = colName || here?.name || '(No supplier)'
+      const vid = (iVendor >= 0 && c[iVendor]?.id) || here?.id || `name:${name}`
       const due = (c[iDue]?.value ?? '').slice(0, 10) || null
       const date = iDate >= 0 ? (c[iDate]?.value ?? '').slice(0, 10) || null : null
       const dueMs = due ? Date.UTC(+due.slice(0, 4), +due.slice(5, 7) - 1, +due.slice(8, 10)) : asOfMs
@@ -243,8 +260,8 @@ export function parseAgedPayableDetail(report: QboReport, asOf: string) {
       v.total = round2(v.total + open)
       v.buckets[bucket] = round2(v.buckets[bucket] + open)
       v.bills.push({
-        txn_id: c[iType]?.id ?? null,
-        type: c[iType]?.value ?? 'Bill',
+        txn_id: iType >= 0 ? c[iType]?.id ?? null : null,
+        type: iType >= 0 ? c[iType]?.value || 'Bill' : 'Bill',
         num: iNum >= 0 ? c[iNum]?.value || null : null,
         date,
         due,
@@ -254,7 +271,7 @@ export function parseAgedPayableDetail(report: QboReport, asOf: string) {
       })
     }
   }
-  walk(report.Rows?.Row)
+  walk(report.Rows?.Row, null)
 
   const list = [...vendors.values()].sort((a, b) => b.total - a.total)
   return { vendors: list, total: round2(list.reduce((a, v) => a + v.total, 0)) }
