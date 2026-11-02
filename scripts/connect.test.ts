@@ -77,3 +77,17 @@ test('authorise names the mismatched project', async () => {
     globalThis.fetch = realFetch
   }
 })
+
+test('connect failure messages tell credentials apart from redirect problems', async () => {
+  const u = new URL(await connectUrl(env, req, 'Client Ltd'))
+  const state = u.searchParams.get('state')!
+  const realFetch = globalThis.fetch
+  try {
+    globalThis.fetch = (async () => new Response('{"error":"invalid_client"}', { status: 401 })) as typeof fetch
+    await assert.rejects(completeConnect(env, req, 'code', '123', state), /matching pair, both from the same Intuit app and both Production/)
+    globalThis.fetch = (async () => new Response('{"error":"invalid_grant"}', { status: 400 })) as typeof fetch
+    await assert.rejects(completeConnect(env, req, 'code', '123', state), /https:\/\/aged\.example\.com\/api\/qbo-callback is added under the Production redirect URIs/)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})

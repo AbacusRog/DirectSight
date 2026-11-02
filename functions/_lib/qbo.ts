@@ -143,7 +143,7 @@ async function refresh(env: Env, conn: Connection): Promise<Connection> {
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: {
-      authorization: `Basic ${btoa(`${env.QBO_CLIENT_ID}:${env.QBO_CLIENT_SECRET}`)}`,
+      authorization: `Basic ${btoa(`${env.QBO_CLIENT_ID.trim()}:${env.QBO_CLIENT_SECRET.trim()}`)}`,
       'content-type': 'application/x-www-form-urlencoded',
       accept: 'application/json',
     },
@@ -311,7 +311,7 @@ export const redirectUri = (request: Request) => `${new URL(request.url).origin}
 
 export async function connectUrl(env: Env, request: Request, label: string): Promise<string> {
   const q = new URLSearchParams({
-    client_id: env.QBO_CLIENT_ID,
+    client_id: env.QBO_CLIENT_ID.trim(),
     response_type: 'code',
     scope: 'com.intuit.quickbooks.accounting',
     redirect_uri: redirectUri(request),
@@ -328,14 +328,32 @@ export async function completeConnect(env: Env, request: Request, code: string, 
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: {
-      authorization: `Basic ${btoa(`${env.QBO_CLIENT_ID}:${env.QBO_CLIENT_SECRET}`)}`,
+      authorization: `Basic ${btoa(`${env.QBO_CLIENT_ID.trim()}:${env.QBO_CLIENT_SECRET.trim()}`)}`,
       'content-type': 'application/x-www-form-urlencoded',
       accept: 'application/json',
     },
     body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri(request) }),
   })
   await logCall(env, realm, 'oauth2/tokens/bearer (connect)', res.status, res.headers.get('intuit_tid'))
-  if (!res.ok) throw new Error(`QuickBooks refused the connection (${res.status}). Check the redirect URI is registered for your Intuit production keys.`)
+  if (!res.ok) {
+    let code = ''
+    try {
+      code = String(((await res.json()) as { error?: string }).error ?? '')
+    } catch {
+      /* body not JSON */
+    }
+    if (res.status === 401 || code === 'invalid_client') {
+      throw new Error(
+        'QuickBooks rejected the app credentials (401 invalid_client). QBO_CLIENT_ID and QBO_CLIENT_SECRET must be a matching pair, both from the same Intuit app and both Production (not Development). Re-copy both from Intuit > Keys and credentials > Production, save, and redeploy.',
+      )
+    }
+    if (code === 'invalid_grant' || res.status === 400) {
+      throw new Error(
+        `QuickBooks rejected the sign-in code (${code || res.status}). Make sure ${redirectUri(request)} is added under the Production redirect URIs for your Intuit app, then use Connect a company again (codes expire in minutes and work once).`,
+      )
+    }
+    throw new Error(`QuickBooks refused the connection (${res.status}${code ? ' ' + code : ''}).`)
+  }
   const t = (await res.json()) as { access_token: string; refresh_token: string; expires_in: number; x_refresh_token_expires_in: number }
 
   let companyName: string | null = null
