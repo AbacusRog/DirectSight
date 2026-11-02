@@ -91,3 +91,21 @@ test('connect failure messages tell credentials apart from redirect problems', a
     globalThis.fetch = realFetch
   }
 })
+
+import { checkCredentials } from '../functions/_lib/qbo.ts'
+test('checkCredentials tells a bad pair from a good one and never leaks the secret', async () => {
+  const e = { ...env, QBO_CLIENT_ID: 'ABabcdefghij1234', QBO_CLIENT_SECRET: 'sEcReTvAlUe1234567890' } as Env
+  const realFetch = globalThis.fetch
+  try {
+    globalThis.fetch = (async () => new Response('{"error":"invalid_client"}', { status: 401 })) as typeof fetch
+    const bad = await checkCredentials(e)
+    assert.match(bad.verdict, /REJECTED/)
+    globalThis.fetch = (async () => new Response('{"error":"invalid_grant"}', { status: 400 })) as typeof fetch
+    const good = await checkCredentials(e)
+    assert.match(good.verdict, /^OK/)
+    assert.ok(!JSON.stringify([bad, good]).includes('sEcReTvAlUe'))
+    assert.match((await checkCredentials({ ...e, QBO_CLIENT_SECRET: '' } as Env)).verdict, /not set/)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})

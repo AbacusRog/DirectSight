@@ -62,6 +62,17 @@ function Main() {
     if (ok || bad) window.history.replaceState({}, '', window.location.pathname)
   }, [])
 
+  async function checkKeys() {
+    setError(null)
+    setNotice(null)
+    try {
+      const r = await api<{ client_id: string; secret: string; intuit_says: string; verdict: string }>('/api/qbo-check')
+      setNotice(`QuickBooks keys – client ID ${r.client_id}; secret ${r.secret}; Intuit replied ${r.intuit_says || 'n/a'}. ${r.verdict}`)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
   async function connect() {
     const label = window.prompt('Name for this company (e.g. the client\'s name):')
     if (!label?.trim()) return
@@ -207,6 +218,9 @@ function Main() {
             ))}
           </select>
         )}
+        <button onClick={checkKeys} className="px-3 py-2 rounded-lg border bg-white">
+          Check QuickBooks keys
+        </button>
         <button onClick={connect} disabled={connecting} className="px-3 py-2 rounded-lg border bg-white disabled:opacity-50">
           {connecting ? 'Opening QuickBooks…' : 'Connect a company'}
         </button>

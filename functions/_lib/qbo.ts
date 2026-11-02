@@ -385,3 +385,41 @@ export async function completeConnect(env: Env, request: Request, code: string, 
   )
   return companyName ?? st.label
 }
+
+/**
+ * Tests the Intuit client id + secret pair WITHOUT a sign-in: asks Intuit to refresh a dummy token.
+ * Wrong credentials -> 401 invalid_client. Right credentials -> 400 invalid_grant (the dummy token is refused).
+ * Never returns the secret itself, only its length and character types.
+ */
+export async function checkCredentials(env: Env) {
+  const id = (env.QBO_CLIENT_ID ?? '').trim()
+  const secret = (env.QBO_CLIENT_SECRET ?? '').trim()
+  const out = {
+    client_id: id ? `${id.slice(0, 6)}…${id.slice(-4)} (${id.length} characters)` : 'MISSING',
+    secret: secret ? `${secret.length} characters, ${/[^A-Za-z0-9]/.test(secret) ? 'contains symbols/spaces' : 'letters and numbers only'}` : 'MISSING',
+    intuit_says: '',
+    verdict: '',
+  }
+  if (!id || !secret) {
+    out.verdict = 'QBO_CLIENT_ID or QBO_CLIENT_SECRET is not set in Cloudflare (Production).'
+    return out
+  }
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      authorization: `Basic ${btoa(`${id}:${secret}`)}`,
+      'content-type': 'application/x-www-form-urlencoded',
+      accept: 'application/json',
+    },
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: 'credential-check' }),
+  })
+  const err = String(((await res.json().catch(() => ({}))) as { error?: string }).error ?? '')
+  out.intuit_says = `${res.status}${err ? ' ' + err : ''}`
+  out.verdict =
+    res.status === 401 || err === 'invalid_client'
+      ? 'REJECTED: Intuit does not accept this client ID + secret as a pair. Re-copy the secret for the SAME app and environment (Production) as the ID.'
+      : res.status === 400 || err === 'invalid_grant'
+        ? 'OK: Intuit accepts this ID + secret pair (it only refused the dummy token, as expected). If Connect still fails, the problem is elsewhere.'
+        : 'Unexpected reply from Intuit.'
+  return out
+}
