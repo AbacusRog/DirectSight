@@ -30,3 +30,27 @@ test('supaUrl strips slashes and pasted REST endpoints', () => {
     assert.equal(supaUrl({ SUPABASE_URL: u } as Env), 'https://x.supabase.co')
   }
 })
+
+import { authorise } from '../functions/_lib/qbo.ts'
+test('authorise explains each refusal', async () => {
+  const noAuth = new Request('https://x/api/companies')
+  const withTok = new Request('https://x/api/companies', { headers: { authorization: 'Bearer tok' } })
+  assert.match((await authorise(noAuth, {} as Env) as { error: string }).error, /missing SUPABASE_URL/)
+  assert.match((await authorise(noAuth, env) as { error: string }).error, /Not signed in/)
+
+  const realFetch = globalThis.fetch
+  try {
+    globalThis.fetch = (async () => new Response('{}', { status: 401 })) as typeof fetch
+    assert.match((await authorise(withTok, env) as { error: string }).error, /same project/)
+
+    let n = 0
+    globalThis.fetch = (async () => (++n === 1 ? new Response('{"id":"u"}') : new Response('false'))) as typeof fetch
+    assert.match((await authorise(withTok, env) as { error: string }).error, /not an admin/)
+
+    n = 0
+    globalThis.fetch = (async () => (++n === 1 ? new Response('{"id":"u"}') : new Response('true'))) as typeof fetch
+    assert.deepEqual(await authorise(withTok, env), { who: 'staff' })
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})

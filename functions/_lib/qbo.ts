@@ -42,26 +42,40 @@ export async function sb(env: Env, path: string, init: RequestInit = {}, extra: 
   return text ? JSON.parse(text) : null
 }
 
-/** Allow either a signed-in staff member (Supabase JWT) or the daily job (CRON_SECRET). */
-export async function authorise(request: Request, env: Env): Promise<'staff' | 'cron' | null> {
-  const auth = request.headers.get('authorization') ?? ''
-  const token = auth.replace(/^Bearer\s+/i, '')
-  if (!token) return null
+export type AuthResult = { who: 'staff' | 'cron' } | { error: string }
 
-  if (env.CRON_SECRET && token === env.CRON_SECRET) return 'cron'
+/**
+ * Allow either a signed-in admin (Supabase JWT) or the daily job (CRON_SECRET).
+ * On refusal, says exactly why, because the usual cause is a Cloudflare variable from the wrong project.
+ */
+export async function authorise(request: Request, env: Env): Promise<AuthResult> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { error: 'Server is missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY (Cloudflare Pages > Settings > Variables and Secrets, Production), then redeploy.' }
+  }
+  const token = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+  if (!token) return { error: 'Not signed in (no login token sent).' }
 
-  // Check the user's JWT is valid, then that they are an admin (is_admin() reads auth.uid() from user_roles).
+  if (env.CRON_SECRET && token === env.CRON_SECRET) return { who: 'cron' }
+
+  // 1. Is the user's JWT valid for THIS Supabase project?
   const user = await fetch(`${supaUrl(env)}/auth/v1/user`, {
-    headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, authorization: `Bearer ${token}` },
+    headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY.trim(), authorization: `Bearer ${token}` },
   })
-  if (!user.ok) return null
+  if (!user.ok) {
+    return {
+      error: `Supabase rejected your login (${user.status}). SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must belong to the same project you sign in to (VITE_SUPABASE_URL = Clients).`,
+    }
+  }
+
+  // 2. Are they an admin? (is_admin() reads auth.uid() from user_roles.)
   const rpc = await fetch(`${supaUrl(env)}/rest/v1/rpc/is_admin`, {
     method: 'POST',
-    headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY.trim(), authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: '{}',
   })
-  if (!rpc.ok) return null
-  return (await rpc.json()) === true ? 'staff' : null // 'staff' = signed-in admin
+  if (!rpc.ok) return { error: `Admin check failed (${rpc.status}): ${(await rpc.text()).slice(0, 160)}` }
+  if ((await rpc.json()) !== true) return { error: 'You are signed in, but this login is not an admin in the Clients project (user_roles).' }
+  return { who: 'staff' } // 'staff' = signed-in admin
 }
 
 interface Connection {

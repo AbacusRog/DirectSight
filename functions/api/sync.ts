@@ -3,8 +3,9 @@ import { authorise, json, sb, syncCompany, type Env } from '../_lib/qbo'
 // POST /api/sync  { realm_id }            – staff: refresh one company (button / on open)
 // POST /api/sync  { all: true } + CRON_SECRET – daily job: refresh every connected company
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  const who = await authorise(request, env)
-  if (!who) return json({ error: 'Not authorised' }, 401)
+  const a = await authorise(request, env)
+  if ('error' in a) return json({ error: a.error }, 401)
+  const who = a.who
 
   const body = (await request.json().catch(() => ({}))) as { realm_id?: string; all?: boolean }
 
