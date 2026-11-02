@@ -2,6 +2,9 @@ import { Component, StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App'
+import { installPrintGuard } from './lib/theme'
+
+installPrintGuard()
 
 // Show any unexpected crash on screen instead of a blank page.
 class Boundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -12,9 +15,9 @@ class Boundary extends Component<{ children: ReactNode }, { error: Error | null 
   render() {
     if (!this.state.error) return this.props.children
     return (
-      <div className="p-6 max-w-xl mx-auto">
-        <h1 className="text-lg font-semibold">Something went wrong</h1>
-        <pre className="mt-2 text-sm text-red-700 whitespace-pre-wrap">{this.state.error.message}</pre>
+      <div className="mx-auto max-w-xl p-6">
+        <h1 className="text-lg">Something went wrong</h1>
+        <pre className="mt-2 whitespace-pre-wrap text-sm text-bad">{this.state.error.message}</pre>
       </div>
     )
   }

@@ -13,6 +13,10 @@ Shows each supplier's unpaid bills from QuickBooks Online, aged into Not yet due
 - Supplier rules live in `ac_supplier_rules`: due date, X days after bill date, fixed day each month, weekly run day, pay immediately, or hold. Weekend dates move to the Friday before (Monday if that has passed). UK bank holidays are not handled.
 - Access is admin only: the signed-in user needs a row in `user_roles` with role `admin` in the Clients project (checked by `is_admin()`, both in the database policies and in the Pages Functions). Log in with an account that exists in the Clients project's Auth users.
 
+## Appearance
+
+Light and dark themes (the sun/moon button in the header). It follows the device setting until you choose, then remembers your choice. Reports always print in light. The look is a ledger-paper palette with Source Serif 4 for titles and figures and IBM Plex Sans for tables, both bundled with the app (no external font requests). Colours are CSS variables in `src/index.css`.
+
 ## Management report
 
 The **Management report** tab shows the last 13 months of **Profit and loss** and **Balance sheet** from QuickBooks (accrual or cash basis) in three views:

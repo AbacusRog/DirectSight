@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js'
 import Login from './Login'
 import RuleEditor from './RuleEditor'
 import Reports from './Reports'
+import { AgeBar, AgeStrip, Brand, ThemeToggle } from './ui'
 import { api, configMissing, fmtDate, gbp, supabase } from './lib/supabase'
 import { describeRule, suggestForSupplier } from './lib/paymentDates'
 import { BUCKETS, type Company, type Snapshot, type SupplierRule, type VendorBalance } from './lib/types'
@@ -25,11 +26,11 @@ export default function App() {
   if (configMissing)
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="max-w-md bg-white rounded-xl shadow p-6 space-y-2">
-          <h1 className="text-lg font-semibold">App not configured</h1>
-          <p className="text-sm text-slate-600">
+        <div className="panel max-w-md p-6 space-y-2">
+          <h1 className="text-lg">App not configured</h1>
+          <p className="text-sm text-muted">
             <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> are not set. Add them under the Cloudflare
-            Pages project's Variables and Secrets (as plain variables), then redeploy – they are baked in at build time.
+            Pages project's Variables and Secrets (as plain variables), then redeploy. They are baked in at build time.
           </p>
         </div>
       </div>
@@ -52,6 +53,7 @@ function Main() {
   const loadedRealm = useRef('')
   const [notice, setNotice] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const [menu, setMenu] = useState(false)
 
   // Result of the QuickBooks consent redirect (?connected=… / ?connect_error=…)
   useEffect(() => {
@@ -205,13 +207,21 @@ function Main() {
     }
 
   const overdue = totals.total - totals.current
+  const late60 = totals.d61_90 + totals.d91plus
+  const AGE_CLASS = { d1_30: 'age-1', d31_60: 'age-2', d61_90: 'age-3', d91plus: 'age-4' } as const
+  const chevron = (isOpen: boolean) => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+      className={`shrink-0 text-muted transition-transform ${isOpen ? 'rotate-90' : ''}`} aria-hidden="true">
+      <path d="M9 6l6 6-6 6" />
+    </svg>
+  )
 
   return (
-    <div className="max-w-7xl mx-auto p-4 space-y-4">
-      <header className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-semibold mr-auto">Aged Creditors</h1>
+    <div className="mx-auto max-w-7xl space-y-5 px-4 py-5 sm:px-6">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <Brand />
         {companies.length > 0 && (
-          <select value={realm} onChange={(e) => setRealm(e.target.value)} className="border rounded-lg px-3 py-2 bg-white">
+          <select value={realm} onChange={(e) => setRealm(e.target.value)} className="field sm:ml-3" aria-label="Company">
             {companies.map((c) => (
               <option key={c.realm_id} value={c.realm_id}>
                 {c.company_name ?? c.label}
@@ -219,56 +229,86 @@ function Main() {
             ))}
           </select>
         )}
-        <button onClick={checkKeys} className="px-3 py-2 rounded-lg border bg-white">
-          Check QuickBooks keys
-        </button>
-        <button onClick={connect} disabled={connecting} className="px-3 py-2 rounded-lg border bg-white disabled:opacity-50">
-          {connecting ? 'Opening QuickBooks…' : 'Connect a company'}
-        </button>
-        {tab !== 'reports' && (
-          <>
-        <span className="text-sm text-slate-500">
-          {snap ? `Updated ${new Date(snap.fetched_at).toLocaleString('en-GB')}` : 'No data yet'}
-        </span>
-        <button
-          onClick={() => realm && sync(realm)}
-          disabled={syncing || !realm}
-          className="px-3 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-50"
-        >
-          {syncing ? 'Refreshing…' : 'Refresh'}
-        </button>
-          </>
-        )}
-        <button onClick={() => supabase.auth.signOut()} className="px-3 py-2 rounded-lg border bg-white">
-          Sign out
-        </button>
+        <div className="ml-auto flex flex-wrap items-center gap-2 print:hidden">
+          {tab !== 'reports' && (
+            <>
+              <span className="hidden text-sm text-muted sm:inline">
+                {snap ? `Updated ${new Date(snap.fetched_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}` : 'No data yet'}
+              </span>
+              <button onClick={() => realm && sync(realm)} disabled={syncing || !realm} className="btn btn-primary">
+                {syncing ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </>
+          )}
+          <div className="relative">
+            <button className="btn" onClick={() => setMenu((m) => !m)} aria-expanded={menu} aria-haspopup="menu">
+              Connections
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            {menu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
+                <div className="panel absolute right-0 z-20 mt-1.5 w-56 p-1 shadow-lg" role="menu">
+                  <button role="menuitem" className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-sunken disabled:opacity-50" disabled={connecting}
+                    onClick={() => { setMenu(false); connect() }}>
+                    {connecting ? 'Opening QuickBooks…' : 'Connect a company'}
+                  </button>
+                  <button role="menuitem" className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-sunken"
+                    onClick={() => { setMenu(false); checkKeys() }}>
+                    Check QuickBooks keys
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          <ThemeToggle />
+          <button onClick={() => supabase.auth.signOut()} className="btn btn-quiet">Sign out</button>
+        </div>
       </header>
 
-      {notice && <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg p-3 text-sm">{notice}</div>}
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm">{error}</div>}
+      {notice && <div className="notice notice-ok">{notice}</div>}
+      {error && <div className="notice notice-error">{error}</div>}
 
       {companies.length === 0 && !error && (
-        <div className="bg-white rounded-xl shadow p-6 text-center text-slate-600">
-          No company connected yet. Use <b>Connect a company</b> and sign in to QuickBooks as someone with access to that company.
+        <div className="panel flex flex-col items-start gap-3 p-6">
+          <h2 className="text-lg">Connect a QuickBooks company</h2>
+          <p className="max-w-prose text-muted">
+            Sign in to QuickBooks as someone with access to the company. Its aged creditors and management report will appear here.
+          </p>
+          <button onClick={connect} disabled={connecting} className="btn btn-primary">
+            {connecting ? 'Opening QuickBooks…' : 'Connect a company'}
+          </button>
         </div>
       )}
 
       {tab !== 'reports' && (
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card label="Total owed" value={gbp(totals.total)} />
-        <Card label="Overdue" value={gbp(overdue)} />
-        <Card label="Over 60 days overdue" value={gbp(totals.d61_90 + totals.d91plus)} />
-        <Card label="Suppliers" value={String(rows.length)} />
-      </section>
+        <section className="panel">
+          <div className="grid grid-cols-2 gap-y-1 md:grid-cols-4 md:divide-x md:divide-rule">
+            {[
+              { label: 'Total owed', value: gbp(totals.total) === '–' ? '£0' : gbp(totals.total), bad: false },
+              { label: 'Overdue', value: gbp(overdue) === '–' ? '£0' : gbp(overdue), bad: overdue > 0 },
+              { label: 'More than 60 days overdue', value: gbp(late60) === '–' ? '£0' : gbp(late60), bad: late60 > 0 },
+              { label: 'Suppliers', value: String(rows.length), bad: false },
+            ].map((k) => (
+              <div key={k.label} className="px-5 py-4">
+                <div className="text-[0.8125rem] text-muted">{k.label}</div>
+                <div className={`font-serif text-[1.75rem] leading-tight tabular-nums ${k.bad ? 'text-bad' : ''}`}>{k.value}</div>
+              </div>
+            ))}
+          </div>
+          {totals.total > 0 && (
+            <div className="border-t px-5 py-4">
+              <AgeStrip totals={totals} />
+            </div>
+          )}
+        </section>
       )}
 
-      <nav className="flex gap-2">
+      <nav className="tabs print:hidden" role="tablist">
         {(['aged', 'schedule', 'reports'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 rounded-lg ${tab === t ? 'bg-slate-900 text-white' : 'bg-white border'}`}
-          >
+          <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className="tab">
             {t === 'aged' ? 'Aged creditors' : t === 'schedule' ? 'Payment schedule' : 'Management report'}
           </button>
         ))}
@@ -277,46 +317,51 @@ function Main() {
       {tab === 'reports' && realm && <Reports realm={realm} />}
 
       {tab === 'aged' && (
-        <div className="bg-white rounded-xl shadow overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-100 text-left">
+        <div className="panel overflow-x-auto">
+          <table className="ledger">
+            <thead>
               <tr>
-                <th className="p-3">Supplier</th>
+                <th>Supplier</th>
+                <th>Age</th>
                 {BUCKETS.map((b) => (
-                  <th key={b.key} className="p-3 text-right whitespace-nowrap">
-                    {b.label}
-                  </th>
+                  <th key={b.key} className="num">{b.label}</th>
                 ))}
-                <th className="p-3 text-right">Total</th>
-                <th className="p-3">Suggested payment</th>
-                <th className="p-3">Rule</th>
+                <th className="num">Total</th>
+                <th>Suggested payment</th>
+                <th>Rule</th>
               </tr>
             </thead>
             <tbody>
               {rows.map(({ v, s }) => (
                 <Fragment key={v.vendor_id}>
-                  <tr className="border-t hover:bg-slate-50 cursor-pointer" onClick={() => setOpen(open === v.vendor_id ? null : v.vendor_id)}>
-                    <td className="p-3 font-medium">{v.name}</td>
+                  <tr className="click" onClick={() => setOpen(open === v.vendor_id ? null : v.vendor_id)}>
+                    <td className="min-w-[12rem] font-medium">
+                      <span className="flex items-center gap-2">
+                        {chevron(open === v.vendor_id)}
+                        {v.name}
+                      </span>
+                    </td>
+                    <td><AgeBar buckets={v.buckets} /></td>
                     {BUCKETS.map((b) => (
-                      <td key={b.key} className={`p-3 text-right tabular-nums ${b.key === 'd91plus' && v.buckets.d91plus ? 'text-red-600' : ''}`}>
+                      <td key={b.key} className={`num ${b.key !== 'current' && v.buckets[b.key] > 0 ? AGE_CLASS[b.key] : ''}`}>
                         {gbp(v.buckets[b.key])}
                       </td>
                     ))}
-                    <td className="p-3 text-right font-semibold tabular-nums">{gbp(v.total)}</td>
-                    <td className="p-3 whitespace-nowrap">
+                    <td className="num font-semibold">{gbp(v.total)}</td>
+                    <td className="whitespace-nowrap">
                       {s.on_hold ? (
-                        <span className="text-amber-600">On hold</span>
+                        <span className="text-warn">On hold</span>
                       ) : s.next_pay_on ? (
                         <>
-                          {fmtDate(s.next_pay_on)} <span className="text-slate-500">· {gbp(s.amount_on_next)}</span>
+                          {fmtDate(s.next_pay_on)} <span className="text-muted tabular-nums">{gbp(s.amount_on_next)}</span>
                         </>
                       ) : (
-                        '–'
+                        <span className="text-muted">–</span>
                       )}
                     </td>
-                    <td className="p-3">
+                    <td className="whitespace-nowrap">
                       <button
-                        className="text-blue-600 hover:underline text-left"
+                        className="text-left text-pen underline-offset-2 hover:underline"
                         onClick={(e) => {
                           e.stopPropagation()
                           setEditing(newRule(v))
@@ -327,33 +372,31 @@ function Main() {
                     </td>
                   </tr>
                   {open === v.vendor_id && (
-                    <tr className="bg-slate-50">
-                      <td colSpan={9} className="p-3">
-                        {rules[v.vendor_id]?.notes && <p className="mb-2 text-slate-600">📝 {rules[v.vendor_id].notes}</p>}
-                        <table className="w-full text-xs">
-                          <thead className="text-left text-slate-500">
+                    <tr>
+                      <td colSpan={10} className="!bg-sunken !py-3">
+                        {rules[v.vendor_id]?.notes && <p className="mb-2 text-muted">Note: {rules[v.vendor_id].notes}</p>}
+                        <table className="ledger text-[0.8125rem]">
+                          <thead>
                             <tr>
-                              <th className="py-1">Type</th>
+                              <th>Type</th>
                               <th>Ref</th>
                               <th>Bill date</th>
                               <th>Due</th>
-                              <th className="text-right">Days overdue</th>
-                              <th className="text-right">Open</th>
-                              <th className="pl-4">Suggested</th>
+                              <th className="num">Days overdue</th>
+                              <th className="num">Open</th>
+                              <th>Suggested</th>
                             </tr>
                           </thead>
                           <tbody>
                             {s.per_bill.map(({ bill, pay_on, reason }, i) => (
-                              <tr key={i} className="border-t">
-                                <td className="py-1">{bill.type}</td>
+                              <tr key={i}>
+                                <td>{bill.type}</td>
                                 <td>{bill.num ?? ''}</td>
                                 <td>{fmtDate(bill.date)}</td>
                                 <td>{fmtDate(bill.due)}</td>
-                                <td className="text-right">{bill.days_overdue > 0 ? bill.days_overdue : ''}</td>
-                                <td className="text-right tabular-nums">{gbp(bill.open_balance)}</td>
-                                <td className="pl-4">
-                                  {pay_on ? `${fmtDate(pay_on)} – ${reason}` : reason}
-                                </td>
+                                <td className="num">{bill.days_overdue > 0 ? bill.days_overdue : ''}</td>
+                                <td className="num">{gbp(bill.open_balance)}</td>
+                                <td>{pay_on ? `${fmtDate(pay_on)}. ${reason}` : reason}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -364,21 +407,19 @@ function Main() {
                 </Fragment>
               ))}
               {rows.length > 0 && (
-                <tr className="border-t-2 font-semibold bg-slate-100">
-                  <td className="p-3">Total</td>
+                <tr className="grand">
+                  <td colSpan={2}>Total</td>
                   {BUCKETS.map((b) => (
-                    <td key={b.key} className="p-3 text-right tabular-nums">
-                      {gbp(totals[b.key])}
-                    </td>
+                    <td key={b.key} className="num">{gbp(totals[b.key])}</td>
                   ))}
-                  <td className="p-3 text-right tabular-nums">{gbp(totals.total)}</td>
+                  <td className="num">{gbp(totals.total)}</td>
                   <td colSpan={2} />
                 </tr>
               )}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="p-6 text-center text-slate-500">
-                    {syncing ? 'Fetching from QuickBooks…' : 'No unpaid bills.'}
+                  <td colSpan={10} className="!py-10 text-center text-muted">
+                    {syncing ? 'Fetching from QuickBooks…' : companies.length ? 'No unpaid bills.' : 'Connect a company to see its creditors.'}
                   </td>
                 </tr>
               )}
@@ -388,54 +429,45 @@ function Main() {
       )}
 
       {tab === 'schedule' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {schedule.dates.map(([date, items]) => (
-            <div key={date} className="bg-white rounded-xl shadow p-4">
-              <div className="flex justify-between font-semibold mb-2">
-                <span>{new Date(date + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })}</span>
-                <span className="tabular-nums">{gbp(items.reduce((a, i) => a + i.amount, 0))}</span>
+            <section key={date} className="panel">
+              <div className="flex items-baseline justify-between gap-4 border-b px-5 py-3">
+                <h3 className="text-[1.0625rem]">
+                  {new Date(date + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}
+                </h3>
+                <span className="font-serif text-lg tabular-nums">{gbp(items.reduce((a, i) => a + i.amount, 0))}</span>
               </div>
-              <ul className="text-sm divide-y">
+              <ul className="divide-y divide-rule text-sm">
                 {items.map((i) => (
-                  <li key={i.vendor.vendor_id} className="py-1 flex justify-between gap-4">
+                  <li key={i.vendor.vendor_id} className="flex justify-between gap-4 px-5 py-2.5">
                     <span>
-                      {i.vendor.name} <span className="text-slate-500">· {[...i.reasons].join('; ')}</span>
+                      {i.vendor.name} <span className="text-muted">{[...i.reasons].join('; ')}</span>
                     </span>
                     <span className="tabular-nums">{gbp(i.amount)}</span>
                   </li>
                 ))}
               </ul>
-            </div>
+            </section>
           ))}
           {schedule.held.length > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm">
-              <p className="font-semibold mb-1">On hold</p>
+            <div className="notice notice-warn">
+              <p className="mb-1 font-semibold">On hold</p>
               {schedule.held.map((h) => (
                 <p key={h.vendor.vendor_id}>
-                  {h.vendor.name} – {gbp(h.amount)}
+                  {h.vendor.name}: {gbp(h.amount)}
                 </p>
               ))}
             </div>
           )}
-          {schedule.dates.length === 0 && schedule.held.length === 0 && (
-            <p className="text-center text-slate-500 p-6">Nothing to schedule.</p>
-          )}
-          <p className="text-xs text-slate-500">
-            Weekend dates move to the Friday before (or Monday if that has passed). UK bank holidays aren't accounted for.
+          {schedule.dates.length === 0 && schedule.held.length === 0 && <p className="p-6 text-center text-muted">Nothing to schedule.</p>}
+          <p className="text-xs text-muted">
+            Weekend dates move to the Friday before, or to Monday if that has passed. UK bank holidays aren't accounted for.
           </p>
         </div>
       )}
 
       {editing && <RuleEditor rule={editing} onSave={saveRule} onClose={() => setEditing(null)} />}
-    </div>
-  )
-}
-
-function Card({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-white rounded-xl shadow p-4">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="text-xl font-semibold tabular-nums">{value}</div>
     </div>
   )
 }

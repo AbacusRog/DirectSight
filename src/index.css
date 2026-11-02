@@ -1,1 +1,306 @@
 @import 'tailwindcss';
+@import '@fontsource-variable/source-serif-4';
+@import '@fontsource-variable/ibm-plex-sans';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+  Ledger paper. The light theme is the pale green analysis paper accountants have always used,
+  with ink for figures and red ink for what is overdue. The dark theme is the same ledger at night.
+*/
+:root {
+  --paper: #eef3ec;
+  --surface: #f9fbf7;
+  --sunken: #e3ebe0;
+  --rule: #cad6cb;
+  --rule-strong: #94aa9b;
+  --ink: #14231b;
+  --muted: #55675c;
+  --pen: #234e92;
+  --bad: #a8231b;
+  --bad-wash: #f8e3df;
+  --warn: #8a5200;
+  --warn-wash: #f7ecd3;
+  --good: #1d6643;
+  --good-wash: #ddefe3;
+  /* ageing ramp: not yet due -> 91+ days */
+  --age-0: #7fae93;
+  --age-1: #d2a93f;
+  --age-2: #d4803a;
+  --age-3: #c0502b;
+  --age-4: #9b1f1a;
+  color-scheme: light;
+}
+
+.dark {
+  --paper: #0e1612;
+  --surface: #141e19;
+  --sunken: #1b2822;
+  --rule: #26352d;
+  --rule-strong: #47604f;
+  --ink: #e3ebe5;
+  --muted: #8fa397;
+  --pen: #8db3ee;
+  --bad: #f08a80;
+  --bad-wash: #3a1c19;
+  --warn: #e3b766;
+  --warn-wash: #35290f;
+  --good: #7fd0a2;
+  --good-wash: #14301f;
+  --age-0: #5e9478;
+  --age-1: #c9a04a;
+  --age-2: #d08a47;
+  --age-3: #d1633c;
+  --age-4: #e5544a;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Source Serif 4 Variable', ui-serif, Georgia, serif;
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-pen: var(--pen);
+  --color-bad: var(--bad);
+  --color-bad-wash: var(--bad-wash);
+  --color-warn: var(--warn);
+  --color-warn-wash: var(--warn-wash);
+  --color-good: var(--good);
+  --color-good-wash: var(--good-wash);
+  --color-age-0: var(--age-0);
+  --color-age-1: var(--age-1);
+  --color-age-2: var(--age-2);
+  --color-age-3: var(--age-3);
+  --color-age-4: var(--age-4);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--rule);
+  }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+  button,
+  select,
+  input,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+  :focus-visible {
+    outline: 2px solid var(--pen);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--pen) 28%, transparent);
+  }
+}
+
+@layer components {
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.8rem;
+    border: 1px solid var(--rule-strong);
+    border-radius: 5px;
+    background: var(--surface);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    cursor: pointer;
+    transition: background-color 0.12s, border-color 0.12s;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--sunken);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .btn-primary {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--ink);
+    opacity: 0.88;
+  }
+  .btn-quiet {
+    border-color: transparent;
+    background: transparent;
+    color: var(--muted);
+  }
+  .btn-sm {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.8125rem;
+  }
+  /* a row of buttons that act as one choice */
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--rule-strong);
+    border-radius: 5px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .seg > button {
+    padding: 0.35rem 0.8rem;
+    font-size: 0.875rem;
+    border-left: 1px solid var(--rule);
+    cursor: pointer;
+    transition: background-color 0.12s;
+  }
+  .seg > button:first-child {
+    border-left: 0;
+  }
+  .seg > button:hover {
+    background: var(--sunken);
+  }
+  .seg > button[aria-pressed='true'] {
+    background: var(--ink);
+    color: var(--paper);
+  }
+  .field {
+    border: 1px solid var(--rule-strong);
+    border-radius: 5px;
+    background: var(--surface);
+    padding: 0.4rem 0.65rem;
+    font-size: 0.875rem;
+    min-width: 0;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 7px;
+  }
+  .notice {
+    border: 1px solid;
+    border-radius: 6px;
+    padding: 0.6rem 0.85rem;
+    font-size: 0.875rem;
+  }
+  .notice-ok {
+    background: var(--good-wash);
+    color: var(--good);
+    border-color: color-mix(in srgb, var(--good) 35%, transparent);
+  }
+  .notice-error {
+    background: var(--bad-wash);
+    color: var(--bad);
+    border-color: color-mix(in srgb, var(--bad) 35%, transparent);
+  }
+  .notice-warn {
+    background: var(--warn-wash);
+    color: var(--warn);
+    border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+  }
+
+  /* underline tabs */
+  .tabs {
+    display: flex;
+    gap: 1.75rem;
+    border-bottom: 1px solid var(--rule);
+    overflow-x: auto;
+  }
+  .tab {
+    padding: 0.5rem 0;
+    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .tab:hover {
+    color: var(--ink);
+  }
+  .tab[aria-selected='true'] {
+    color: var(--ink);
+    border-bottom-color: var(--ink);
+  }
+
+  /* ledger tables: ruled rows, a heavy rule under the headings, a double rule under the grand total */
+  .ledger {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  .ledger th {
+    padding: 0.6rem 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.8125rem;
+    color: var(--muted);
+    border-bottom: 2px solid var(--rule-strong);
+    white-space: nowrap;
+  }
+  .ledger td {
+    padding: 0.55rem 0.75rem;
+    border-top: 1px solid var(--rule);
+  }
+  .ledger tbody > tr:first-child > td {
+    border-top: 0;
+  }
+  .ledger .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  /* first column stays put while a wide table scrolls sideways */
+  .ledger .stick {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface);
+  }
+  .ledger tr.click:hover > td {
+    background: var(--sunken);
+    cursor: pointer;
+  }
+  .ledger tr.sect > td {
+    font-weight: 600;
+    background: var(--sunken);
+  }
+  .ledger tr.tot > td {
+    font-weight: 600;
+    border-top: 1px solid var(--rule-strong);
+  }
+  .ledger tr.grand > td {
+    font-weight: 700;
+    border-top: 3px double var(--ink);
+  }
+  /* a cell tinted by how overdue it is */
+  .age-1 { background: color-mix(in srgb, var(--age-1) 16%, transparent); }
+  .age-2 { background: color-mix(in srgb, var(--age-2) 18%, transparent); }
+  .age-3 { background: color-mix(in srgb, var(--age-3) 20%, transparent); }
+  .age-4 { background: color-mix(in srgb, var(--age-4) 24%, transparent); }
+}
+
+/* the age strip fills in once on load; nothing else animates by itself */
+.age-seg {
+  transition: width 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .age-seg {
+    transition: none;
+  }
+}
