@@ -9,7 +9,10 @@ Shows each supplier's unpaid bills from QuickBooks Online, aged into Not yet due
 - Has its own QuickBooks connections in `public.ac_connections` (Clients project), separate from the Abacus project's `qbo_connections` and the other apps, so it can be pointed at any company (e.g. a client's). Use **Connect a company** in the app: it sends you to QuickBooks to approve access, then returns here. A company switcher appears once more than one is connected.
 - `POST /api/sync` refreshes the QuickBooks token if needed (and writes the rotated token straight back), pulls the **AgedPayableDetail** report, groups it by supplier and caches it in `ac_snapshots`.
 - Opening the app shows the cached snapshot immediately and re-syncs if it is more than 15 minutes old. **Refresh** forces a sync.
-- Ageing is by **due date** (days past due). Credits are kept in the totals but never given a payment date.
+- **Ageing** has two views, switched above the table (and remembered in your browser):
+  - **30-day periods**: days past each bill's due date (not yet due, 1-30, 31-60, 61-90, 91+), as QuickBooks reports it.
+  - **Calendar months**: this month, then back 2 to 12 previous months, then everything older. Age from the **bill date** (default) or the **due date**; by due date a "Later" column appears for bills due after this month. Month names are fixed ("Sep", not "Sept") so they read the same on every device.
+  Either way, credits are netted into their own column so every supplier's row adds up to their total, and credits are never given a payment date.
 - Supplier rules live in `ac_supplier_rules`: due date, X days after bill date, fixed day each month, weekly run day, pay immediately, or hold. Weekend dates move to the Friday before (Monday if that has passed). UK bank holidays are not handled.
 - Access is admin only: the signed-in user needs a row in `user_roles` with role `admin` in the Clients project (checked by `is_admin()`, both in the database policies and in the Pages Functions). Log in with an account that exists in the Clients project's Auth users.
 

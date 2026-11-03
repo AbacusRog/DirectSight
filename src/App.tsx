@@ -4,6 +4,7 @@ import Login from './Login'
 import RuleEditor from './RuleEditor'
 import Reports from './Reports'
 import { AgeBar, AgeStrip, Brand, ThemeToggle } from './ui'
+import { buildAgeing, type AgeBasis, type AgeMode } from './lib/ageing'
 import { api, configMissing, fmtDate, gbp, supabase } from './lib/supabase'
 import { describeRule, suggestForSupplier } from './lib/paymentDates'
 import { BUCKETS, type Company, type Snapshot, type SupplierRule, type VendorBalance } from './lib/types'
@@ -54,6 +55,17 @@ function Main() {
   const [notice, setNotice] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [menu, setMenu] = useState(false)
+  // How creditors are aged: 30-day periods, or calendar months by bill date / due date. Remembered per browser.
+  const [ageMode, setAgeMode] = useState<AgeMode>(() => (localStorage.getItem('ac_age_mode') === 'months' ? 'months' : 'days'))
+  const [ageBasis, setAgeBasis] = useState<AgeBasis>(() => (localStorage.getItem('ac_age_basis') === 'due' ? 'due' : 'bill'))
+  const [agePrev, setAgePrev] = useState<number>(() => Number(localStorage.getItem('ac_age_prev')) || 4)
+  const remember = (k: string, v: string | number) => {
+    try {
+      localStorage.setItem(k, String(v))
+    } catch {
+      /* private mode: just not remembered */
+    }
+  }
   // Who is signed in. Until the server answers, assume the most restricted view.
   const [me, setMe] = useState<{ role: 'admin' | 'client'; access: { realm_id: string; can_edit_rules: boolean }[] } | null>(null)
   useEffect(() => {
@@ -215,9 +227,14 @@ function Main() {
     }
 
   const canEditRules = isAdmin || !!me?.access.find((x) => x.realm_id === realm)?.can_edit_rules
+  const ageing = useMemo(
+    () => buildAgeing(snap?.vendors ?? [], { mode: ageMode, basis: ageBasis, prevMonths: agePrev, today }),
+    [snap, ageMode, ageBasis, agePrev, today],
+  )
+  const colCount = 2 + ageing.columns.length + 3 // supplier, age bar, the age columns, total, payment, rule
+  const TINT = ['', 'age-1', 'age-2', 'age-3', 'age-4']
   const overdue = totals.total - totals.current
   const late60 = totals.d61_90 + totals.d91plus
-  const AGE_CLASS = { d1_30: 'age-1', d31_60: 'age-2', d61_90: 'age-3', d91plus: 'age-4' } as const
   const chevron = (isOpen: boolean) => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
       className={`shrink-0 text-muted transition-transform ${isOpen ? 'rotate-90' : ''}`} aria-hidden="true">
@@ -321,7 +338,7 @@ function Main() {
           </div>
           {totals.total > 0 && (
             <div className="border-t px-5 py-4">
-              <AgeStrip totals={totals} />
+              <AgeStrip columns={ageing.columns} amounts={ageing.totals} />
             </div>
           )}
         </section>
@@ -338,14 +355,46 @@ function Main() {
       {tab === 'reports' && realm && <Reports realm={realm} />}
 
       {tab === 'aged' && (
+        <>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 print:hidden">
+          <span className="text-sm text-muted">Age by</span>
+          <div className="seg" role="group" aria-label="How to age creditors">
+            <button aria-pressed={ageMode === 'days'} onClick={() => { setAgeMode('days'); remember('ac_age_mode', 'days') }}>30-day periods</button>
+            <button aria-pressed={ageMode === 'months'} onClick={() => { setAgeMode('months'); remember('ac_age_mode', 'months') }}>Calendar months</button>
+          </div>
+          {ageMode === 'months' ? (
+            <>
+              <div className="seg" role="group" aria-label="Date to age from">
+                <button aria-pressed={ageBasis === 'bill'} onClick={() => { setAgeBasis('bill'); remember('ac_age_basis', 'bill') }}>Bill date</button>
+                <button aria-pressed={ageBasis === 'due'} onClick={() => { setAgeBasis('due'); remember('ac_age_basis', 'due') }}>Due date</button>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-muted">
+                Show
+                <select
+                  className="field text-ink"
+                  value={agePrev}
+                  onChange={(e) => { setAgePrev(Number(e.target.value)); remember('ac_age_prev', e.target.value) }}
+                  aria-label="Previous months to show"
+                >
+                  {[2, 3, 4, 5, 6, 9, 12].map((n) => (
+                    <option key={n} value={n}>this month and {n} previous</option>
+                  ))}
+                </select>
+                <span>then everything older</span>
+              </label>
+            </>
+          ) : (
+            <span className="text-sm text-muted">Days past each bill's due date.</span>
+          )}
+        </div>
         <div className="panel overflow-x-auto">
           <table className="ledger">
             <thead>
               <tr>
                 <th>Supplier</th>
                 <th>Age</th>
-                {BUCKETS.map((b) => (
-                  <th key={b.key} className="num">{b.label}</th>
+                {ageing.columns.map((c) => (
+                  <th key={c.key} className="num">{c.label}</th>
                 ))}
                 <th className="num">Total</th>
                 <th>Suggested payment</th>
@@ -371,12 +420,15 @@ function Main() {
                         {v.name}
                       </button>
                     </td>
-                    <td><AgeBar buckets={v.buckets} /></td>
-                    {BUCKETS.map((b) => (
-                      <td key={b.key} className={`num ${b.key !== 'current' && v.buckets[b.key] > 0 ? AGE_CLASS[b.key] : ''}`}>
-                        {gbp(v.buckets[b.key])}
-                      </td>
-                    ))}
+                    <td><AgeBar columns={ageing.columns} amounts={ageing.rows[v.vendor_id] ?? []} /></td>
+                    {ageing.columns.map((c, i) => {
+                      const amt = ageing.rows[v.vendor_id]?.[i] ?? 0
+                      return (
+                        <td key={c.key} className={`num ${amt > 0 ? TINT[c.ramp] : ''}`}>
+                          {gbp(amt)}
+                        </td>
+                      )
+                    })}
                     <td className="num font-semibold">{gbp(v.total)}</td>
                     <td className="whitespace-nowrap">
                       {s.on_hold ? (
@@ -407,7 +459,7 @@ function Main() {
                   </tr>
                   {open === v.vendor_id && (
                     <tr>
-                      <td colSpan={10} className="!bg-sunken !py-3">
+                      <td colSpan={colCount} className="!bg-sunken !py-3">
                         {rules[v.vendor_id]?.notes && <p className="mb-2 text-muted">Note: {rules[v.vendor_id].notes}</p>}
                         <table className="ledger text-[0.8125rem]">
                           <thead>
@@ -443,8 +495,8 @@ function Main() {
               {rows.length > 0 && (
                 <tr className="grand">
                   <td colSpan={2}>Total</td>
-                  {BUCKETS.map((b) => (
-                    <td key={b.key} className="num">{gbp(totals[b.key])}</td>
+                  {ageing.columns.map((c, i) => (
+                    <td key={c.key} className="num">{gbp(ageing.totals[i])}</td>
                   ))}
                   <td className="num">{gbp(totals.total)}</td>
                   <td colSpan={2} />
@@ -452,7 +504,7 @@ function Main() {
               )}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="!py-10 text-center text-muted">
+                  <td colSpan={colCount} className="!py-10 text-center text-muted">
                     {syncing ? 'Fetching from QuickBooks…' : companies.length ? 'No unpaid bills.' : 'Connect a company to see its creditors.'}
                   </td>
                 </tr>
@@ -460,6 +512,7 @@ function Main() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {tab === 'schedule' && (
