@@ -16,6 +16,10 @@ Shows each supplier's unpaid bills from QuickBooks Online, aged into Not yet due
 - Supplier rules live in `ac_supplier_rules`: due date, X days after bill date, fixed day each month, weekly run day, pay immediately, or hold. Weekend dates move to the Friday before (Monday if that has passed). UK bank holidays are not handled.
 - Access is admin only: the signed-in user needs a row in `user_roles` with role `admin` in the Clients project (checked by `is_admin()`, both in the database policies and in the Pages Functions). Log in with an account that exists in the Clients project's Auth users.
 
+## Choosing which suppliers to pay
+
+Each supplier on the **Aged creditors** tab has a tick box (the box in the header ticks or unticks everyone). Only ticked suppliers appear in the **Payment schedule**, which also has its own list of suppliers to adjust, **Tick all / Untick all**, and a total for what is selected. Everyone is ticked by default, so a new supplier shows up straight away. The selection is remembered per company in this browser (it is not shared between devices).
+
 ## Giving a client access to their own company
 
 Admins (a `user_roles` row with role `admin` in the Clients project) see every company and can connect companies and check the QuickBooks keys. A **client login** is tied to specific companies and can do nothing else:

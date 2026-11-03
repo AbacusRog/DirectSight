@@ -5,6 +5,7 @@ import RuleEditor from './RuleEditor'
 import Reports from './Reports'
 import { AgeBar, AgeStrip, Brand, ThemeToggle } from './ui'
 import { buildAgeing, type AgeBasis, type AgeMode } from './lib/ageing'
+import { countIncluded, includeAll, includeNone, loadExcluded, saveExcluded, toggleSupplier } from './lib/selection'
 import { api, configMissing, fmtDate, gbp, supabase } from './lib/supabase'
 import { describeRule, suggestForSupplier } from './lib/paymentDates'
 import { BUCKETS, type Company, type Snapshot, type SupplierRule, type VendorBalance } from './lib/types'
@@ -55,6 +56,15 @@ function Main() {
   const [notice, setNotice] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [menu, setMenu] = useState(false)
+  // Suppliers left out of the payment schedule. Everyone is in by default; remembered per company in this browser.
+  const [excluded, setExcluded] = useState<Set<string>>(() => new Set())
+  useEffect(() => {
+    setExcluded(loadExcluded(realm))
+  }, [realm])
+  const changeExcluded = (next: Set<string>) => {
+    setExcluded(next)
+    saveExcluded(realm, next)
+  }
   // How creditors are aged: 30-day periods, or calendar months by bill date / due date. Remembered per browser.
   const [ageMode, setAgeMode] = useState<AgeMode>(() => (localStorage.getItem('ac_age_mode') === 'months' ? 'months' : 'days'))
   const [ageBasis, setAgeBasis] = useState<AgeBasis>(() => (localStorage.getItem('ac_age_basis') === 'due' ? 'due' : 'bill'))
@@ -179,10 +189,12 @@ function Main() {
     return t
   }, [rows])
 
+  const includedRows = useMemo(() => rows.filter(({ v }) => !excluded.has(v.vendor_id)), [rows, excluded])
+
   const schedule = useMemo(() => {
     const byDate = new Map<string, { vendor: VendorBalance; amount: number; reasons: Set<string> }[]>()
     const held: { vendor: VendorBalance; amount: number }[] = []
-    for (const { v, s } of rows) {
+    for (const { v, s } of includedRows) {
       const perDate = new Map<string, { amount: number; reasons: Set<string> }>()
       let heldAmt = 0
       for (const b of s.per_bill) {
@@ -199,7 +211,7 @@ function Main() {
       if (heldAmt) held.push({ vendor: v, amount: heldAmt })
     }
     return { dates: [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)), held }
-  }, [rows])
+  }, [includedRows])
 
   async function saveRule(r: SupplierRule) {
     const { id: _id, ...payload } = r
@@ -231,7 +243,9 @@ function Main() {
     () => buildAgeing(snap?.vendors ?? [], { mode: ageMode, basis: ageBasis, prevMonths: agePrev, today }),
     [snap, ageMode, ageBasis, agePrev, today],
   )
-  const colCount = 2 + ageing.columns.length + 3 // supplier, age bar, the age columns, total, payment, rule
+  const allIds = rows.map(({ v }) => v.vendor_id)
+  const ticked = countIncluded(allIds, excluded)
+  const colCount = 3 + ageing.columns.length + 2 // tick, supplier, age bar, the age columns, total, rule
   const TINT = ['', 'age-1', 'age-2', 'age-3', 'age-4']
   const overdue = totals.total - totals.current
   const late60 = totals.d61_90 + totals.d91plus
@@ -386,18 +400,32 @@ function Main() {
           ) : (
             <span className="text-sm text-muted">Days past each bill's due date.</span>
           )}
+          <span className="ml-auto text-sm text-muted">
+            {ticked} of {rows.length} suppliers ticked for the payment schedule
+          </span>
         </div>
         <div className="panel overflow-x-auto">
           <table className="ledger">
             <thead>
               <tr>
+                <th className="w-8 !pr-0">
+                  <input
+                    type="checkbox"
+                    aria-label="Include all suppliers in the payment schedule"
+                    title="Include all suppliers in the payment schedule"
+                    checked={rows.length > 0 && ticked === rows.length}
+                    ref={(el) => {
+                      if (el) el.indeterminate = ticked > 0 && ticked < rows.length
+                    }}
+                    onChange={() => changeExcluded(ticked === rows.length ? includeNone(allIds) : includeAll())}
+                  />
+                </th>
                 <th>Supplier</th>
                 <th>Age</th>
                 {ageing.columns.map((c) => (
                   <th key={c.key} className="num">{c.label}</th>
                 ))}
                 <th className="num">Total</th>
-                <th>Suggested payment</th>
                 <th>Rule</th>
               </tr>
             </thead>
@@ -405,6 +433,14 @@ function Main() {
               {rows.map(({ v, s }) => (
                 <Fragment key={v.vendor_id}>
                   <tr className="click" onClick={() => setOpen(open === v.vendor_id ? null : v.vendor_id)}>
+                    <td className="w-8 !pr-0" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Include ${v.name} in the payment schedule`}
+                        checked={!excluded.has(v.vendor_id)}
+                        onChange={() => changeExcluded(toggleSupplier(excluded, v.vendor_id))}
+                      />
+                    </td>
                     <td className="min-w-[12rem] font-medium">
                       <button
                         type="button"
@@ -430,17 +466,6 @@ function Main() {
                       )
                     })}
                     <td className="num font-semibold">{gbp(v.total)}</td>
-                    <td className="whitespace-nowrap">
-                      {s.on_hold ? (
-                        <span className="text-warn">On hold</span>
-                      ) : s.next_pay_on ? (
-                        <>
-                          {fmtDate(s.next_pay_on)} <span className="text-muted tabular-nums">{gbp(s.amount_on_next)}</span>
-                        </>
-                      ) : (
-                        <span className="text-muted">–</span>
-                      )}
-                    </td>
                     <td className="whitespace-nowrap">
                       {canEditRules ? (
                         <button
@@ -494,12 +519,12 @@ function Main() {
               ))}
               {rows.length > 0 && (
                 <tr className="grand">
-                  <td colSpan={2}>Total</td>
+                  <td colSpan={3}>Total</td>
                   {ageing.columns.map((c, i) => (
                     <td key={c.key} className="num">{gbp(ageing.totals[i])}</td>
                   ))}
                   <td className="num">{gbp(totals.total)}</td>
-                  <td colSpan={2} />
+                  <td />
                 </tr>
               )}
               {rows.length === 0 && (
@@ -517,6 +542,43 @@ function Main() {
 
       {tab === 'schedule' && (
         <div className="space-y-4">
+          <section className="panel print:hidden">
+            <div className="flex flex-wrap items-center gap-3 border-b px-5 py-3">
+              <h3 className="text-[1.0625rem]">Suppliers in this payment run</h3>
+              <span className="text-sm text-muted">
+                {ticked} of {rows.length} ticked
+              </span>
+              <div className="ml-auto flex gap-2">
+                <button className="btn btn-sm" onClick={() => changeExcluded(includeAll())} disabled={ticked === rows.length}>
+                  Tick all
+                </button>
+                <button className="btn btn-sm" onClick={() => changeExcluded(includeNone(allIds))} disabled={ticked === 0}>
+                  Untick all
+                </button>
+              </div>
+            </div>
+            <ul className="grid gap-x-8 gap-y-1 px-5 py-3 text-sm" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(17rem, 1fr))' }}>
+              {rows.map(({ v, s: sup }) => (
+                <li key={v.vendor_id}>
+                  <label className="flex cursor-pointer items-center gap-2 py-0.5">
+                    <input type="checkbox" checked={!excluded.has(v.vendor_id)} onChange={() => changeExcluded(toggleSupplier(excluded, v.vendor_id))} />
+                    <span className="truncate">{v.name}</span>
+                    <span className="ml-auto tabular-nums text-muted">{gbp(sup.payable_total)}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </section>
+          {schedule.dates.length > 0 && (
+            <p className="text-sm text-muted">
+              Scheduled to pay{' '}
+              <span className="font-serif text-[1.0625rem] text-ink tabular-nums">
+                {gbp(schedule.dates.reduce((a, [, items]) => a + items.reduce((x, i) => x + i.amount, 0), 0))}
+              </span>{' '}
+              across {new Set(schedule.dates.flatMap(([, items]) => items.map((i) => i.vendor.vendor_id))).size} supplier
+              {new Set(schedule.dates.flatMap(([, items]) => items.map((i) => i.vendor.vendor_id))).size === 1 ? '' : 's'}.
+            </p>
+          )}
           {schedule.dates.map(([date, items]) => (
             <section key={date} className="panel">
               <div className="flex items-baseline justify-between gap-4 border-b px-5 py-3">
@@ -547,7 +609,9 @@ function Main() {
               ))}
             </div>
           )}
-          {schedule.dates.length === 0 && schedule.held.length === 0 && <p className="p-6 text-center text-muted">Nothing to schedule.</p>}
+          {schedule.dates.length === 0 && schedule.held.length === 0 && (
+            <p className="p-6 text-center text-muted">{ticked === 0 ? 'No suppliers ticked. Tick the suppliers you want to pay above.' : 'Nothing to schedule for the ticked suppliers.'}</p>
+          )}
           <p className="text-xs text-muted">
             Weekend dates move to the Friday before, or to Monday if that has passed. UK bank holidays aren't accounted for.
           </p>
