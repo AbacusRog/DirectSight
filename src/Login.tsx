@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from './lib/supabase'
+import Turnstile from './Turnstile'
 import { Brand, ThemeToggle } from './ui'
 
 export default function Login() {
@@ -8,11 +9,14 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaReset, setCaptchaReset] = useState(0)
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
     setError(null)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { error } = await supabase.auth.signInWithPassword({ email, password, options: { captchaToken: captchaToken ?? undefined } })
+    setCaptchaReset((n) => n + 1)
     if (error) setError(error.message)
     setBusy(false)
   }
@@ -34,7 +38,9 @@ export default function Login() {
           <input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className="field mt-1 w-full" />
         </label>
         {error && <p className="notice notice-error">{error}</p>}
-        <button disabled={busy} className="btn btn-primary w-full justify-center py-2">
+        <Turnstile onToken={setCaptchaToken} resetKey={captchaReset} />
+
+        <button disabled={busy || !captchaToken} className="btn btn-primary w-full justify-center py-2">
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
