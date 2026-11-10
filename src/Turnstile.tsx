@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 
-// Cloudflare Turnstile widget. The site key is public (safe in the browser); the secret lives only in Supabase.
-const SITE_KEY = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined) || '0x4AAAAAAF20-R4Al6pZ-Hrj'
+// Cloudflare Turnstile widget. The site key is public (safe in the browser); the secret is never in this code.
+const SITE_KEY = '0x4AAAAAAF20-R4Al6pZ-Hrj'
 const SCRIPT_SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
 
 interface TurnstileApi {
